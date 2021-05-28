@@ -8,12 +8,21 @@ use rosu_pp::{
 
 const LEGACY_LAST_TICK_OFFSET: f32 = 36.0;
 
+#[derive(Debug)]
+enum ObjectKind {
+    Circle,
+    Slider,
+    Spinner,
+}
+
+#[derive(Debug)]
 pub(crate) struct OsuObject {
     pub(crate) time: f32,
     pub(crate) pos: Pos2,
     pub(crate) end_pos: Pos2,
     // circle: Some(0.0) | slider: Some(_) | spinner: None
-    pub(crate) travel_dist: Option<f32>,
+    kind: ObjectKind,
+    pub(crate) travel_dist: f32,
 }
 
 impl OsuObject {
@@ -33,7 +42,8 @@ impl OsuObject {
                 time: h.start_time,
                 pos: h.pos,
                 end_pos: h.pos,
-                travel_dist: Some(0.0),
+                kind: ObjectKind::Circle,
+                travel_dist: 0.0,
             },
             HitObjectKind::Slider {
                 pixel_len,
@@ -143,14 +153,16 @@ impl OsuObject {
                     time: h.start_time,
                     pos: h.pos,
                     end_pos,
-                    travel_dist: Some(travel_dist),
+                    kind: ObjectKind::Slider,
+                    travel_dist,
                 }
             }
             HitObjectKind::Spinner { .. } => Self {
                 time: h.start_time,
                 pos: h.pos,
                 end_pos: h.pos,
-                travel_dist: None,
+                kind: ObjectKind::Spinner,
+                travel_dist: 0.0,
             },
             HitObjectKind::Hold { .. } => return None,
         };
@@ -159,7 +171,12 @@ impl OsuObject {
     }
 
     #[inline]
+    pub(crate) fn is_slider(&self) -> bool {
+        matches!(self.kind, ObjectKind::Slider)
+    }
+
+    #[inline]
     pub(crate) fn is_spinner(&self) -> bool {
-        self.travel_dist.is_none()
+        matches!(self.kind, ObjectKind::Spinner)
     }
 }

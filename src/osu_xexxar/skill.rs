@@ -1,95 +1,148 @@
 use super::{DifficultyObject, SkillKind};
 
-use std::cmp::Ordering;
+use std::collections::VecDeque;
 
-const SPEED_SKILL_MULTIPLIER: f32 = 1400.0;
-const SPEED_STRAIN_DECAY_BASE: f32 = 0.3;
+const TARGET_FC_PRECISION: f32 = 0.1;
 
-const AIM_SKILL_MULTIPLIER: f32 = 26.25;
-const AIM_STRAIN_DECAY_BASE: f32 = 0.15;
-
-const DECAY_WEIGHT: f32 = 0.9;
-
-pub(crate) struct Skill {
-    current_strain: f32,
-    current_section_peak: f32,
-
+#[derive(Debug)]
+pub(crate) struct Skill<'h> {
     kind: SkillKind,
     pub(crate) strain_peaks: Vec<f32>,
+    pub(crate) times: Vec<f32>,
+    previous: VecDeque<DifficultyObject<'h>>,
 
-    prev_time: Option<f32>,
+    curr_strain: f32,
 }
 
-impl Skill {
+impl<'h> Skill<'h> {
     #[inline]
     pub(crate) fn new(kind: SkillKind) -> Self {
         Self {
-            current_strain: 1.0,
-            current_section_peak: 1.0,
-
             kind,
             strain_peaks: Vec::with_capacity(128),
+            times: Vec::with_capacity(128),
+            previous: VecDeque::with_capacity(kind.history_len()),
 
-            prev_time: None,
+            curr_strain: 1.0,
         }
     }
 
     #[inline]
-    pub(crate) fn save_current_peak(&mut self) {
-        self.strain_peaks.push(self.current_section_peak);
+    pub(crate) fn process_internal(&mut self, current: DifficultyObject<'h>) {
+        if self.previous.len() > self.kind.history_len() {
+            self.previous.pop_back();
+        }
+
+        self.process(&current);
+
+        self.previous.push_front(current);
     }
 
     #[inline]
-    pub(crate) fn start_new_section_from(&mut self, time: f32) {
-        self.current_section_peak = self.peak_strain(time - self.prev_time.unwrap());
+    fn process(&mut self, current: &DifficultyObject) {
+        let strain_at = self
+            .kind
+            .strain_value_at(&mut self.curr_strain, current, &self.previous);
+
+        // println!("{}", strain_at);
+
+        self.strain_peaks.push(strain_at);
+
+        self.times.push(current.base.time);
     }
 
     #[inline]
-    pub(crate) fn process(&mut self, current: &DifficultyObject) {
-        self.current_strain *= self.strain_decay(current.delta);
-        self.current_strain += self.kind.strain_value_of(&current) * self.skill_multiplier();
-        self.current_section_peak = self.current_section_peak.max(self.current_strain);
-        self.prev_time.replace(current.base.time);
-    }
-
     pub(crate) fn difficulty_value(&mut self) -> f32 {
-        let mut difficulty = 0.0;
-        let mut weight = 1.0;
+        let total_difficulty = self.calculate_difficulty_value();
 
-        self.strain_peaks
-            .sort_unstable_by(|a, b| b.partial_cmp(a).unwrap_or(Ordering::Equal));
+        // println!(">{}", total_difficulty);
+
+        self.fc_time_skill_level(total_difficulty)
+    }
+
+    fn expected_target_time(&self, total_difficulty: f32) -> f32 {
+        let mut target_time = 0.0;
+
+        for i in 1..self.strain_peaks.len() {
+            target_time += (self.times[i] - self.times[i - 1]).min(2000.0)
+                * (self.strain_peaks[i] / total_difficulty);
+        }
+
+        target_time
+    }
+
+    fn expected_fc_time(&self, skill: f32) -> f32 {
+        let mut last_timestamp = self.times[0] - 5.0;
+        let mut fc_time = 0.0;
+
+        for i in 0..self.strain_peaks.len() {
+            let dt = self.times[i] - last_timestamp;
+            last_timestamp = self.times[i];
+            let fc_prob = self.fc_probability(skill, self.strain_peaks[i]);
+            fc_time = (fc_time + dt) / fc_prob;
+
+            // println!(
+            //     "dt={} | last_timestamp={} | fc_prob={} | fc_time = {}",
+            //     dt, last_timestamp, fc_prob, fc_time
+            // );
+        }
+
+        fc_time - (self.times.last().expect("no last") - self.times[0])
+    }
+
+    fn fc_time_skill_level(&mut self, total_difficulty: f32) -> f32 {
+        let mut length_estimate = 0.4 * (self.times.last().expect("no last") - self.times[0]);
+        let target_fc_time = (30 * 60 * 1000) as f32
+            + 45.0 * (self.expected_target_time(total_difficulty) - 60_000.0).max(0.0);
+
+        // println!(
+        //     "length_estimate={} | target_fc_time={}",
+        //     length_estimate, target_fc_time
+        // );
+
+        let mut fc_prob = length_estimate / target_fc_time;
+        let mut skill = self.skill_level(fc_prob, total_difficulty);
+
+        // println!("fc_prob={} | skill={}", fc_prob, skill);
+
+        for _ in 0..5 {
+            let fc_time = self.expected_fc_time(skill);
+            length_estimate = fc_time * fc_prob;
+            fc_prob = length_estimate / target_fc_time;
+            skill = self.skill_level(fc_prob, total_difficulty);
+
+            // println!(
+            //     "fc_time={} | length_estimate={} | fc_prob={} | skill={}",
+            //     fc_time, length_estimate, fc_prob, skill
+            // );
+
+            if (fc_time - target_fc_time).abs() < TARGET_FC_PRECISION * target_fc_time {
+                break;
+            }
+        }
+
+        skill
+    }
+
+    fn calculate_difficulty_value(&mut self) -> f32 {
+        let difficulty_exponent = self.kind.difficulty_exponent();
+        let mut difficulty = 0.0;
 
         for &strain in self.strain_peaks.iter() {
-            difficulty += strain * weight;
-            weight *= DECAY_WEIGHT;
+            difficulty += strain.powf(difficulty_exponent);
+            // println!("{}^{} => {}", strain, difficulty_exponent, difficulty);
         }
 
-        difficulty
+        difficulty.powf(difficulty_exponent.recip())
     }
 
     #[inline]
-    fn skill_multiplier(&self) -> f32 {
-        match self.kind {
-            SkillKind::Aim => AIM_SKILL_MULTIPLIER,
-            SkillKind::Speed => SPEED_SKILL_MULTIPLIER,
-        }
+    fn fc_probability(&self, skill: f32, difficulty: f32) -> f32 {
+        (-(difficulty / skill.max(1e-10)).powf(self.kind.difficulty_exponent())).exp()
     }
 
     #[inline]
-    fn strain_decay_base(&self) -> f32 {
-        match self.kind {
-            SkillKind::Aim => AIM_STRAIN_DECAY_BASE,
-            SkillKind::Speed => SPEED_STRAIN_DECAY_BASE,
-        }
-    }
-
-    #[inline]
-    fn peak_strain(&self, delta_time: f32) -> f32 {
-        self.current_strain * self.strain_decay(delta_time)
-    }
-
-    #[inline]
-    fn strain_decay(&self, ms: f32) -> f32 {
-        self.strain_decay_base().powf(ms / 1000.0)
+    fn skill_level(&self, probability: f32, difficulty: f32) -> f32 {
+        difficulty * (-probability.ln()).powf(-self.kind.difficulty_exponent().recip())
     }
 }

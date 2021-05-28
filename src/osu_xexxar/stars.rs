@@ -7,8 +7,7 @@ use super::{difficulty_range_od, DifficultyObject, OsuObject, Skill, SkillKind, 
 use rosu_pp::{osu::DifficultyAttributes, Beatmap, Mods, StarResult};
 
 const OBJECT_RADIUS: f32 = 64.0;
-const SECTION_LEN: f32 = 400.0;
-const DIFFICULTY_MULTIPLIER: f32 = 0.0675;
+const DIFFICULTY_MULTIPLIER: f32 = 0.18;
 const NORMALIZED_RADIUS: f32 = 52.0;
 
 /// Star calculation for osu!standard maps.
@@ -37,7 +36,6 @@ pub fn stars(map: &Beatmap, mods: impl Mods, passed_objects: Option<usize>) -> S
         return StarResult::Osu(diff_attributes);
     }
 
-    let section_len = SECTION_LEN * map_attributes.clock_rate;
     let radius = OBJECT_RADIUS * (1.0 - 0.7 * (map_attributes.cs - 5.0) / 5.0) / 2.0;
     let mut scaling_factor = NORMALIZED_RADIUS / radius;
 
@@ -49,7 +47,7 @@ pub fn stars(map: &Beatmap, mods: impl Mods, passed_objects: Option<usize>) -> S
     let mut slider_state = SliderState::new(map);
     let mut ticks_buf = Vec::new();
 
-    let mut hit_objects = map.hit_objects.iter().take(take).filter_map(|h| {
+    let hit_objects_iter = map.hit_objects.iter().take(take).filter_map(|h| {
         OsuObject::new(
             h,
             map,
@@ -61,19 +59,19 @@ pub fn stars(map: &Beatmap, mods: impl Mods, passed_objects: Option<usize>) -> S
         )
     });
 
+    let mut hit_objects = Vec::with_capacity(map.hit_objects.len());
+    hit_objects.extend(hit_objects_iter);
+
     let mut aim = Skill::new(SkillKind::Aim);
-    let mut speed = Skill::new(SkillKind::Speed);
+    let mut tap = Skill::new(SkillKind::Tap);
 
     // First object has no predecessor and thus no strain, handle distinctly
-    let mut current_section_end =
-        (map.hit_objects[0].start_time / section_len).ceil() * section_len;
-
     let mut prev_prev = None;
-    let mut prev = hit_objects.next().unwrap();
+    let mut prev = &hit_objects[0];
     let mut prev_vals = None;
 
     // Handle second object separately to remove later if-branching
-    let curr = hit_objects.next().unwrap();
+    let curr = &hit_objects[1];
     let h = DifficultyObject::new(
         &curr,
         &prev,
@@ -83,58 +81,59 @@ pub fn stars(map: &Beatmap, mods: impl Mods, passed_objects: Option<usize>) -> S
         scaling_factor,
     );
 
-    while h.base.time > current_section_end {
-        current_section_end += section_len;
-    }
-
-    aim.process(&h);
-    speed.process(&h);
-
-    prev_prev = Some(prev);
-    prev_vals = Some((h.jump_dist, h.strain_time));
+    prev_prev.replace(prev);
+    prev_vals.replace((h.jump_dist, h.strain_time));
     prev = curr;
 
+    aim.process_internal(h.clone());
+    tap.process_internal(h);
+
     // Handle all other objects
-    for curr in hit_objects {
+    for curr in hit_objects.iter().skip(2) {
         let h = DifficultyObject::new(
-            &curr,
-            &prev,
+            curr,
+            prev,
             prev_vals,
             prev_prev,
             map_attributes.clock_rate,
             scaling_factor,
         );
 
-        while h.base.time > current_section_end {
-            aim.save_current_peak();
-            aim.start_new_section_from(current_section_end);
-            speed.save_current_peak();
-            speed.start_new_section_from(current_section_end);
+        println!(
+            "start={} | delta={} | base={}",
+            h.base.time, h.delta, h.base.pos
+        );
 
-            current_section_end += section_len;
-        }
-
-        aim.process(&h);
-        speed.process(&h);
-
-        prev_prev = Some(prev);
-        prev_vals = Some((h.jump_dist, h.strain_time));
+        prev_prev.replace(prev);
+        prev_vals.replace((h.jump_dist, h.strain_time));
         prev = curr;
+
+        aim.process_internal(h.clone());
+        tap.process_internal(h);
     }
 
-    aim.save_current_peak();
-    speed.save_current_peak();
+    // for (i, (s, t)) in aim.strain_peaks.iter().zip(aim.times.iter()).enumerate() {
+    //     println!("{}: {} [{}]", i, s, t);
+    // }
 
-    let aim_strain = aim.difficulty_value().sqrt() * DIFFICULTY_MULTIPLIER;
-    let speed_strain = speed.difficulty_value().sqrt() * DIFFICULTY_MULTIPLIER;
+    // println!("---");
 
-    let stars = aim_strain + speed_strain + (aim_strain - speed_strain).abs() / 2.0;
+    // for (i, (s, t)) in tap.strain_peaks.iter().zip(tap.times.iter()).enumerate() {
+    //     println!("{}: {} [{}]", i, s, t);
+    // }
+
+    let aim_rating = aim.difficulty_value().powf(0.75) * DIFFICULTY_MULTIPLIER;
+    let speed_rating = tap.difficulty_value().powf(0.75) * DIFFICULTY_MULTIPLIER;
+
+    // println!("aim={} | speed={}", aim_rating, speed_rating);
+
+    let stars = aim_rating + speed_rating + (aim_rating - speed_rating).abs() / 2.0;
 
     diff_attributes.n_circles = map.n_circles as usize;
     diff_attributes.n_spinners = map.n_spinners as usize;
     diff_attributes.stars = stars;
-    diff_attributes.speed_strain = speed_strain;
-    diff_attributes.aim_strain = aim_strain;
+    diff_attributes.speed_strain = aim_rating;
+    diff_attributes.aim_strain = speed_rating;
 
     StarResult::Osu(diff_attributes)
 }

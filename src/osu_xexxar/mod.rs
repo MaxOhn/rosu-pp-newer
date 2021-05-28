@@ -25,7 +25,7 @@ mod slider_state;
 use slider_state::SliderState;
 
 mod stars;
-use stars::stars;
+pub use stars::stars;
 
 use rosu_pp::{Beatmap, Mods, PpResult, StarResult};
 
