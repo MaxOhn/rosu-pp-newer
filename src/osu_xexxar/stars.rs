@@ -8,7 +8,8 @@ use rosu_pp::{osu::DifficultyAttributes, Beatmap, Mods, StarResult};
 
 const OBJECT_RADIUS: f32 = 64.0;
 const DIFFICULTY_MULTIPLIER: f32 = 0.18;
-const NORMALIZED_RADIUS: f32 = 52.0;
+const NORMALIZED_RADIUS: f32 = 50.0;
+const DISPLAY_DIFFICULTY_MULTIPLIER: f32 = 0.605;
 
 /// Star calculation for osu!standard maps.
 ///
@@ -99,11 +100,6 @@ pub fn stars(map: &Beatmap, mods: impl Mods, passed_objects: Option<usize>) -> S
             scaling_factor,
         );
 
-        println!(
-            "start={} | delta={} | base={}",
-            h.base.time, h.delta, h.base.pos
-        );
-
         prev_prev.replace(prev);
         prev_vals.replace((h.jump_dist, h.strain_time));
         prev = curr;
@@ -112,28 +108,26 @@ pub fn stars(map: &Beatmap, mods: impl Mods, passed_objects: Option<usize>) -> S
         tap.process_internal(h);
     }
 
-    // for (i, (s, t)) in aim.strain_peaks.iter().zip(aim.times.iter()).enumerate() {
-    //     println!("{}: {} [{}]", i, s, t);
-    // }
-
-    // println!("---");
-
-    // for (i, (s, t)) in tap.strain_peaks.iter().zip(tap.times.iter()).enumerate() {
-    //     println!("{}: {} [{}]", i, s, t);
-    // }
-
     let aim_rating = aim.difficulty_value().powf(0.75) * DIFFICULTY_MULTIPLIER;
     let speed_rating = tap.difficulty_value().powf(0.75) * DIFFICULTY_MULTIPLIER;
 
-    // println!("aim={} | speed={}", aim_rating, speed_rating);
+    let display_aim_rating =
+        aim.calculate_display_value().powf(0.75) * DISPLAY_DIFFICULTY_MULTIPLIER;
+    let display_speed_rating =
+        tap.calculate_display_value().powf(0.75) * DISPLAY_DIFFICULTY_MULTIPLIER;
 
-    let stars = aim_rating + speed_rating + (aim_rating - speed_rating).abs() / 2.0;
+    let display_aim_perf = (display_aim_rating.max(1.0) * 5.0 - 4.0).powi(3) / 100_000.0;
+    let display_speed_perf = (display_speed_rating.max(1.0) * 5.0 - 4.0).powi(3) / 100_000.0;
+
+    let total_pp = (display_aim_perf.powf(1.1) + display_speed_perf.powf(1.1)).powf(1.0 / 1.1);
+
+    let stars = 0.027 * ((100_000.0 / (1.0_f32 / 1.1).exp2() * total_pp).cbrt() + 4.0);
 
     diff_attributes.n_circles = map.n_circles as usize;
     diff_attributes.n_spinners = map.n_spinners as usize;
     diff_attributes.stars = stars;
-    diff_attributes.speed_strain = aim_rating;
-    diff_attributes.aim_strain = speed_rating;
+    diff_attributes.speed_strain = speed_rating;
+    diff_attributes.aim_strain = aim_rating;
 
     StarResult::Osu(diff_attributes)
 }

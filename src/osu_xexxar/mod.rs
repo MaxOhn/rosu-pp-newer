@@ -48,3 +48,21 @@ const OSU_OD_MIN: f32 = 80.0;
 fn difficulty_range_od(od: f32) -> f32 {
     difficulty_range(od, OSU_OD_MAX, OSU_OD_AVG, OSU_OD_MIN)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::fs::File;
+
+    #[tokio::test]
+    async fn single() {
+        let file = File::open("/home/max/Desktop/beatmaps/652234.osu")
+            .await
+            .unwrap();
+        let map = Beatmap::parse(file).await.unwrap();
+
+        let result = OsuPP::new(&map).calculate();
+
+        println!("Stars={} | PP={}", result.stars(), result.pp());
+    }
+}

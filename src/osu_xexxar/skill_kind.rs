@@ -10,8 +10,8 @@ const DECAY_EXCESS_THRESHOLD: f32 = 500.0;
 const AIM_BASE_DECAY: f32 = 0.75;
 const AIM_HISTORY_LEN: usize = 2;
 const AIM_STARS_PER_DOUBLE: f32 = 1.1;
-const AIM_SNAP_STRAIN_MULTIPLIER: f32 = 9.875;
-const AIM_FLOW_STRAIN_MULTIPLIER: f32 = 16.25;
+const AIM_SNAP_STRAIN_MULTIPLIER: f32 = 10.0;
+const AIM_FLOW_STRAIN_MULTIPLIER: f32 = 15.75;
 const AIM_HYBRID_STRAIN_MULTIPLIER: f32 = 8.25;
 const AIM_SLIDER_STRAIN_MULTIPLIER: f32 = 75.0;
 const AIM_TOTAL_STRAIN_MULTIPLIER: f32 = 0.1675;
@@ -54,27 +54,14 @@ impl SkillKind {
                 let flow_strain = flow_strain_at(prev, curr, next, prev_vec, curr_vec);
                 let hybrid_strain =
                     hybrid_strain_at(prev, curr, next, prev_vec, curr_vec, next_vec);
-                let slider_strain = slider_strain_at(prev, curr);
-
-                // println!(
-                //     "snap={} | flow={} | hybrid={} | slider={}",
-                //     snap_strain, flow_strain, hybrid_strain, slider_strain
-                // );
+                let slider_strain = slider_strain_at(prev);
 
                 *curr_strain *= self.compute_decay(current.strain_time);
-                // println!("decay={}", curr_strain);
 
                 *curr_strain += snap_strain * AIM_SNAP_STRAIN_MULTIPLIER;
-                // println!("snap={}", curr_strain);
-
                 *curr_strain += flow_strain * AIM_FLOW_STRAIN_MULTIPLIER;
-                // println!("flow={}", curr_strain);
-
                 *curr_strain += hybrid_strain * AIM_HYBRID_STRAIN_MULTIPLIER;
-                // println!("hybrid={}", curr_strain);
-
                 *curr_strain += slider_strain * AIM_SLIDER_STRAIN_MULTIPLIER;
-                // println!("slider={}", curr_strain);
 
                 *curr_strain * AIM_TOTAL_STRAIN_MULTIPLIER
             }
@@ -91,8 +78,6 @@ impl SkillKind {
                 let mut strain_value = 0.25;
                 let avg_delta_time = (current.strain_time + prev_strain_time) / 2.0;
                 let rhythm_complexity = calculate_rhythm_difficulty(previous);
-
-                // println!("rhythm_complexity={}", rhythm_complexity);
 
                 let div = TAP_STRAIN_TIME_BUFF_RANGE / avg_delta_time;
 
@@ -269,17 +254,10 @@ fn snap_strain_at(prev: &DifficultyObject, curr: &DifficultyObject) -> f32 {
     let prev_diff_vec = prev_vec + curr_vec;
     let angle_dist = (prev_diff_vec.length() - curr_vec.length().max(prev_vec.length())).max(0.0);
 
-    // println!(
-    //     "prev_diff_vec={} | angle_dist={}",
-    //     prev_diff_vec, angle_dist
-    // );
-
     let mut angle_adjustment = 0.0;
     let curr_dist =
         curr_vec.length() * curr.snap_probability() + prev_vec.length() * prev.snap_probability();
     let angle = curr.angle.unwrap_or(0.0).abs();
-
-    // println!("curr_dist={} | angle={}", curr_dist, angle);
 
     if angle < FRAC_PI_3 {
         let base = (FRAC_PI_2 - angle * 1.5).sin();
@@ -291,14 +269,10 @@ fn snap_strain_at(prev: &DifficultyObject, curr: &DifficultyObject) -> f32 {
         angle_adjustment += angle_dist * (1.0 + 0.5 * base * base);
     }
 
-    // println!("angle_adjustment={}", angle_adjustment);
-
     let strain = curr_dist + angle_adjustment * curr.snap_probability() * prev.snap_probability();
 
     let factor = (curr.strain_time / (curr.strain_time - 20.0))
         .min(prev.strain_time / (prev.strain_time - 20.0));
-
-    // println!("=> {} * {} = {}", strain, factor, strain * factor);
 
     strain * factor
 }
@@ -336,6 +310,6 @@ fn hybrid_strain_at(
 }
 
 #[inline]
-fn slider_strain_at(prev: &DifficultyObject, _curr: &DifficultyObject) -> f32 {
+fn slider_strain_at(prev: &DifficultyObject) -> f32 {
     prev.travel_dist / prev.strain_time
 }

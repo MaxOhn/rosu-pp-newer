@@ -2,7 +2,7 @@ use super::math_util;
 
 use rosu_pp::parse::{PathType, Pos2};
 
-const BEZIER_TOLERANCE: f32 = 0.25;
+const BEZIER_TOLERANCE: f32 = 0.15;
 const CATMULL_DETAIL: f32 = 50.0;
 
 pub(crate) enum Points {

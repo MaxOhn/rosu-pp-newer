@@ -302,13 +302,14 @@ impl<'m> OsuPP<'m> {
         }
 
         // AR bonus
-        let mut ar_factor = 0.0;
-        if attributes.ar > 10.33 {
-            ar_factor += 0.2 * (attributes.ar - 10.33);
+        let ar_factor = if attributes.ar > 10.33 {
+            0.225 * (attributes.ar - 10.33)
         } else if attributes.ar < 8.0 {
-            ar_factor += 0.01 * (8.0 - attributes.ar);
-        }
-        aim_value *= 1.0 + ar_factor;
+            0.05 * (8.0 - attributes.ar)
+        } else {
+            0.0
+        };
+        aim_value *= 1.0 + ar_factor * (0.33 + 0.66 * (total_hits / 1000.0).min(1.0));
 
         // HD bonus
         if self.mods.hd() {
@@ -318,9 +319,13 @@ impl<'m> OsuPP<'m> {
         // FL bonus
         if self.mods.fl() {
             aim_value *= 1.0
-                + 0.35 * (total_hits / 200.0).min(1.0)
+                + 0.25 * (total_hits / 200.0).min(1.0)
                 + (total_hits > 200.0) as u8 as f32 * 0.3 * ((total_hits - 200.0) / 300.0).min(1.0)
                 + (total_hits > 500.0) as u8 as f32 * (total_hits - 500.0) / 1200.0;
+
+            if self.mods.hd() {
+                aim_value *= 1.2;
+            }
         }
 
         // Scale with accuracy
@@ -338,9 +343,7 @@ impl<'m> OsuPP<'m> {
 
         // AR bonus
         let ar_factor = if attributes.ar > 10.33 {
-            0.2 * (attributes.ar - 10.33)
-        } else if attributes.ar < 8.0 {
-            0.01 * (8.0 - attributes.ar)
+            0.225 * (attributes.ar - 10.33)
         } else {
             0.0
         };
@@ -348,11 +351,9 @@ impl<'m> OsuPP<'m> {
 
         // Combo scaling
         if let Some(combo) = self.combo.filter(|_| attributes.max_combo > 0) {
-            speed_value *=
-                (((FRAC_PI_4 * (2.0 * (combo as f32 / attributes.max_combo as f32) - 1.0)).tan()
-                    + 1.0)
-                    / 2.0)
-                    .powf(0.8);
+            speed_value *= (combo as f32 / attributes.max_combo as f32)
+                .powf(0.8)
+                .min(1.0);
         }
 
         // Penalize misses

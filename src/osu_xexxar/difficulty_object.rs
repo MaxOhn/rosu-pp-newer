@@ -16,7 +16,7 @@ pub(crate) struct DifficultyObject<'h> {
     pub(crate) delta: f32,
     pub(crate) strain_time: f32,
 
-    flow_probability: f32,
+    pub(crate) flow_probability: f32,
 }
 
 impl<'h> DifficultyObject<'h> {

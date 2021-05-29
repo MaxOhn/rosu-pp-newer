@@ -20,7 +20,6 @@ pub(crate) struct OsuObject {
     pub(crate) time: f32,
     pub(crate) pos: Pos2,
     pub(crate) end_pos: Pos2,
-    // circle: Some(0.0) | slider: Some(_) | spinner: None
     kind: ObjectKind,
     pub(crate) travel_dist: f32,
 }
