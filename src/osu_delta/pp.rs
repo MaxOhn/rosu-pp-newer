@@ -1,7 +1,5 @@
 use super::stars;
-
 use rosu_pp::{osu::DifficultyAttributes, Beatmap, Mods, PpResult, StarResult};
-use std::f32::consts::{E, FRAC_PI_4};
 
 /// Calculator for pp on osu!standard maps.
 ///
@@ -260,7 +258,7 @@ impl<'m> OsuPP<'m> {
 
         let aim_value = self.compute_aim_value(total_hits);
         let speed_value = self.compute_speed_value(total_hits);
-        let acc_value = self.compute_accuracy_value();
+        let acc_value = self.compute_accuracy_value(total_hits);
 
         let pp = (aim_value.powf(1.1) + speed_value.powf(1.1) + acc_value.powf(1.1))
             .powf(1.0 / 1.1)
@@ -283,6 +281,12 @@ impl<'m> OsuPP<'m> {
 
         let mut aim_value = (5.0 * (raw_aim / 0.0675).max(1.0) - 4.0).powi(3) / 100_000.0;
 
+        // Longer maps are worth more
+        let len_bonus = 0.95
+            + 0.4 * (total_hits / 2000.0).min(1.0)
+            + (total_hits > 2000.0) as u8 as f32 * 0.5 * (total_hits / 2000.0).log10();
+        aim_value *= len_bonus;
+
         // Penalize misses
         if self.n_misses > 0 {
             aim_value *= 0.97
@@ -292,22 +296,17 @@ impl<'m> OsuPP<'m> {
 
         // Combo scaling
         if let Some(combo) = self.combo.filter(|_| attributes.max_combo > 0) {
-            aim_value *=
-                (((FRAC_PI_4 * (2.0 * (combo as f32 / attributes.max_combo as f32) - 1.0)).tan()
-                    + 1.0)
-                    / 2.0)
-                    .powf(0.8);
+            aim_value *= ((combo as f32 / attributes.max_combo as f32).powf(0.8)).min(1.0);
         }
 
         // AR bonus
-        let ar_factor = if attributes.ar > 10.33 {
-            0.225 * (attributes.ar - 10.33)
+        let mut ar_factor = 0.0;
+        if attributes.ar > 10.33 {
+            ar_factor += 0.4 * (attributes.ar - 10.33);
         } else if attributes.ar < 8.0 {
-            0.05 * (8.0 - attributes.ar)
-        } else {
-            0.0
-        };
-        aim_value *= 1.0 + ar_factor * (0.33 + 0.66 * (total_hits / 1000.0).min(1.0));
+            ar_factor += 0.01 * (8.0 - attributes.ar);
+        }
+        aim_value *= 1.0 + ar_factor.min(ar_factor * total_hits / 1000.0);
 
         // HD bonus
         if self.mods.hd() {
@@ -317,13 +316,9 @@ impl<'m> OsuPP<'m> {
         // FL bonus
         if self.mods.fl() {
             aim_value *= 1.0
-                + 0.25 * (total_hits / 200.0).min(1.0)
+                + 0.35 * (total_hits / 200.0).min(1.0)
                 + (total_hits > 200.0) as u8 as f32 * 0.3 * ((total_hits - 200.0) / 300.0).min(1.0)
                 + (total_hits > 500.0) as u8 as f32 * (total_hits - 500.0) / 1200.0;
-
-            if self.mods.hd() {
-                aim_value *= 1.2;
-            }
         }
 
         // Scale with accuracy
@@ -339,34 +334,42 @@ impl<'m> OsuPP<'m> {
         let mut speed_value =
             (5.0 * (attributes.speed_strain / 0.0675).max(1.0) - 4.0).powi(3) / 100_000.0;
 
-        // AR bonus
-        let ar_factor = if attributes.ar > 10.33 {
-            0.225 * (attributes.ar - 10.33)
-        } else {
-            0.0
-        };
-        speed_value *= 1.0 + ar_factor;
-
-        // Combo scaling
-        if let Some(combo) = self.combo.filter(|_| attributes.max_combo > 0) {
-            speed_value *= (combo as f32 / attributes.max_combo as f32)
-                .powf(0.8)
-                .min(1.0);
-        }
+        // Longer maps are worth more
+        let len_bonus = 0.95
+            + 0.4 * (total_hits / 2000.0).min(1.0)
+            + (total_hits > 2000.0) as u8 as f32 * 0.5 * (total_hits / 2000.0).log10();
+        speed_value *= len_bonus;
 
         // Penalize misses
         if self.n_misses > 0 {
             speed_value *= 0.97
                 * (1.0 - (self.n_misses as f32 / total_hits).powf(0.775))
-                    .powi(self.n_misses as i32);
+                    .powf((self.n_misses as f32).powf(0.875));
+        }
+
+        // Combo scaling
+        if let Some(combo) = self.combo.filter(|_| attributes.max_combo > 0) {
+            speed_value *= ((combo as f32 / attributes.max_combo as f32).powf(0.8)).min(1.0);
+        }
+
+        // AR bonus
+        if attributes.ar > 10.33 {
+            let ar_factor = 0.4 * (attributes.ar - 10.33);
+            speed_value *= 1.0 + ar_factor.min(ar_factor * total_hits / 1000.0);
+        }
+
+        // HD bonus
+        if self.mods.hd() {
+            speed_value *= 1.0 + 0.04 * (12.0 - attributes.ar);
         }
 
         // Scaling the speed value with accuracy and OD
-        speed_value *= (0.575 + attributes.od * attributes.od / 250.0)
-            * self
-                .acc
-                .unwrap()
-                .powf((14.5 - attributes.od.max(8.0)) / 2.0);
+        let od_factor = 0.95 + attributes.od * attributes.od / 750.0;
+        let acc_factor = self
+            .acc
+            .unwrap()
+            .powf((14.5 - attributes.od.max(8.0)) / 2.0);
+        speed_value *= od_factor * acc_factor;
 
         // Penalize n50s
         speed_value *= 0.98_f32.powf(
@@ -377,34 +380,21 @@ impl<'m> OsuPP<'m> {
         speed_value
     }
 
-    fn compute_accuracy_value(&self) -> f32 {
+    fn compute_accuracy_value(&self, total_hits: f32) -> f32 {
         let attributes = self.attributes.as_ref().unwrap();
         let n_circles = attributes.n_circles as f32;
+        let n300 = self.n300.unwrap_or(0) as f32;
         let n100 = self.n100.unwrap_or(0) as f32;
         let n50 = self.n50.unwrap_or(0) as f32;
 
-        let amount_obj_with_acc = n_circles as f32;
+        let better_acc_percentage = (n_circles > 0.0) as u8 as f32
+            * (((n300 - (total_hits - n_circles)) * 6.0 + n100 * 2.0 + n50) / (n_circles * 6.0))
+                .max(0.0);
 
-        let p100 = n100 as f32 / amount_obj_with_acc;
-        let p50 = n50 as f32 / amount_obj_with_acc;
-        let pm = self.n_misses as f32 / amount_obj_with_acc;
-        let p300 = 1.0 - pm - p100 - p50;
+        let mut acc_value = 1.52163_f32.powf(attributes.od) * better_acc_percentage.powi(24) * 2.83;
 
-        let od = attributes.od;
-        let m300 = 79.5 - 6.0 * od;
-        let m100 = 139.5 - 8.0 * od;
-        let m50 = 199.5 - 10.0 * od;
-
-        let b300 = m300 / 2.0;
-        let b100 = (m300 + m100) / 2.0;
-        let b50 = (m100 + m50) / 2.0;
-        let bm = 229.5 - 11.0 * od;
-
-        let variance = p300 * b300 * b300 + p100 * b100 * b100 + p50 * b50 * b50 + pm * bm * bm;
-
-        let mut acc_value = 2.83
-            * 1.52163_f32.powf((79.5 - 2.0 * variance.sqrt()) / 6.0)
-            * (((E - 1.0) * amount_obj_with_acc.min(1600.0) / 1000.0).ln_1p()).sqrt();
+        // Bonus for many hitcircles
+        acc_value *= ((n_circles as f32 / 1000.0).powf(0.3)).min(1.15);
 
         // HD bonus
         if self.mods.hd() {
@@ -457,5 +447,99 @@ impl OsuAttributeProvider for PpResult {
     #[inline]
     fn attributes(self) -> Option<DifficultyAttributes> {
         self.attributes.attributes()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use rosu_pp::Beatmap;
+
+    #[test]
+    fn osu_only_accuracy() {
+        let map = Beatmap::default();
+
+        let total_objects = 1234;
+        let target_acc = 97.5;
+
+        let calculator = OsuPP::new(&map)
+            .passed_objects(total_objects)
+            .accuracy(target_acc);
+
+        let numerator = 6 * calculator.n300.unwrap_or(0)
+            + 2 * calculator.n100.unwrap_or(0)
+            + calculator.n50.unwrap_or(0);
+        let denominator = 6 * total_objects;
+        let acc = 100.0 * numerator as f32 / denominator as f32;
+
+        assert!(
+            (target_acc - acc).abs() < 1.0,
+            "Expected: {} | Actual: {}",
+            target_acc,
+            acc
+        );
+    }
+
+    #[test]
+    fn osu_accuracy_and_n50() {
+        let map = Beatmap::default();
+
+        let total_objects = 1234;
+        let target_acc = 97.5;
+        let n50 = 30;
+
+        let calculator = OsuPP::new(&map)
+            .passed_objects(total_objects)
+            .n50(n50)
+            .accuracy(target_acc);
+
+        assert!(
+            (calculator.n50.unwrap() as i32 - n50 as i32).abs() <= 4,
+            "Expected: {} | Actual: {}",
+            n50,
+            calculator.n50.unwrap()
+        );
+
+        let numerator = 6 * calculator.n300.unwrap_or(0)
+            + 2 * calculator.n100.unwrap_or(0)
+            + calculator.n50.unwrap_or(0);
+        let denominator = 6 * total_objects;
+        let acc = 100.0 * numerator as f32 / denominator as f32;
+
+        assert!(
+            (target_acc - acc).abs() < 1.0,
+            "Expected: {} | Actual: {}",
+            target_acc,
+            acc
+        );
+    }
+
+    #[test]
+    fn osu_missing_objects() {
+        let map = Beatmap::default();
+
+        let total_objects = 1234;
+        let n300 = 1000;
+        let n100 = 200;
+        let n50 = 30;
+
+        let mut calculator = OsuPP::new(&map)
+            .passed_objects(total_objects)
+            .n300(n300)
+            .n100(n100)
+            .n50(n50);
+
+        calculator.assert_hitresults();
+
+        let n_objects = calculator.n300.unwrap()
+            + calculator.n100.unwrap()
+            + calculator.n50.unwrap()
+            + calculator.n_misses;
+
+        assert_eq!(
+            total_objects, n_objects,
+            "Expected: {} | Actual: {}",
+            total_objects, n_objects
+        );
     }
 }

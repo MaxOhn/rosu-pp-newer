@@ -9,6 +9,9 @@ use difficulty_object::DifficultyObject;
 
 mod math_util;
 
+mod movement;
+use movement::Movement;
+
 mod osu_object;
 use osu_object::OsuObject;
 
@@ -42,9 +45,18 @@ const OSU_OD_MAX: f32 = 20.0;
 const OSU_OD_AVG: f32 = 50.0;
 const OSU_OD_MIN: f32 = 80.0;
 
+const OSU_AR_MAX: f32 = 1800.0;
+const OSU_AR_AVG: f32 = 1200.0;
+const OSU_AR_MIN: f32 = 450.0;
+
 #[inline]
 fn difficulty_range_od(od: f32) -> f32 {
     difficulty_range(od, OSU_OD_MAX, OSU_OD_AVG, OSU_OD_MIN)
+}
+
+#[inline]
+fn difficulty_range_ar(ar: f32) -> f32 {
+    difficulty_range(ar, OSU_AR_MAX, OSU_AR_AVG, OSU_AR_MIN)
 }
 
 #[cfg(test)]
