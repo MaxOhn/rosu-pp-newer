@@ -216,7 +216,7 @@ fn flow_strain_at(
     let angle_adjustment = if angle < FRAC_PI_4 {
         0.0
     } else if angle > FRAC_PI_2 {
-        (prev_diff_vec.length() - curr_vec.length().max(prev_vec.length()))
+        (prev_diff_vec.length() - curr_vec.length().max(prev_vec.length()) / 2.0)
             .min(100.0 / curr.strain_time)
             .max(0.0)
     } else {

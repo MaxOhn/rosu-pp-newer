@@ -10,6 +10,11 @@ path = "../rosu-pp"
 # branch = "next"
 features = ["async_tokio"]
 
+[dependencies.tokio]
+version = "1.6"
+default-features = false
+features = ["io-util"]
+
 [dev-dependencies.tokio]
 version = "1.6"
 features = ["full"]

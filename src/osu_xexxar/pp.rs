@@ -1,6 +1,6 @@
-use super::stars;
+use super::{stars, Beatmap};
 
-use rosu_pp::{osu::DifficultyAttributes, Beatmap, Mods, PpResult, StarResult};
+use rosu_pp::{osu::DifficultyAttributes, Mods, PpResult, StarResult};
 use std::f32::consts::{E, FRAC_PI_4};
 
 /// Calculator for pp on osu!standard maps.
@@ -307,7 +307,8 @@ impl<'m> OsuPP<'m> {
         } else {
             0.0
         };
-        aim_value *= 1.0 + ar_factor * (0.33 + 0.66 * (total_hits / 1000.0).min(1.0));
+
+        aim_value *= 1.0 + ar_factor * (0.33 + 0.66 * (total_hits as u32 / 1000).min(1) as f32);
 
         // HD bonus
         if self.mods.hd() {

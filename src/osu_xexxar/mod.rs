@@ -1,3 +1,6 @@
+mod beatmap;
+pub use beatmap::Beatmap;
+
 mod control_point_iter;
 use control_point_iter::{ControlPoint, ControlPointIter};
 
@@ -47,6 +50,15 @@ fn difficulty_range_od(od: f32) -> f32 {
     difficulty_range(od, OSU_OD_MAX, OSU_OD_AVG, OSU_OD_MIN)
 }
 
+const OSU_AR_MAX: f32 = 450.0;
+const OSU_AR_AVG: f32 = 1200.0;
+const OSU_AR_MIN: f32 = 1800.0;
+
+#[inline]
+fn difficulty_range_ar(ar: f32) -> f32 {
+    difficulty_range(ar, OSU_AR_MAX, OSU_AR_AVG, OSU_AR_MIN)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -54,12 +66,17 @@ mod tests {
 
     #[tokio::test]
     async fn single() {
-        let file = File::open("/home/max/Desktop/beatmaps/652234.osu")
-            .await
-            .unwrap();
+        let map_id = 2097898;
+
+        let file = File::open(format!(
+            "C:/Users/Max/Desktop/Coding/C#/osu-tools/cache/{}.osu",
+            map_id
+        ))
+        .await
+        .unwrap();
         let map = Beatmap::parse(file).await.unwrap();
 
-        let result = OsuPP::new(&map).calculate();
+        let result = OsuPP::new(&map).mods(8 + 16 + 64).calculate();
 
         println!("Stars={} | PP={}", result.stars(), result.pp());
     }

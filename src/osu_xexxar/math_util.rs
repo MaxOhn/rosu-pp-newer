@@ -85,3 +85,19 @@ pub(crate) fn rotate(center: Pos2, origin: Pos2, theta: f32) -> Pos2 {
 
     center + offset
 }
+
+#[inline]
+pub(crate) fn is_linear(p0: Pos2, p1: Pos2, p2: Pos2) -> bool {
+    ((p1.x - p0.x) * (p2.y - p0.y) - (p1.y - p0.y) * (p2.x - p0.x)).abs() <= f32::EPSILON
+}
+
+#[inline]
+pub(crate) fn valid_linear(points: &[Pos2]) -> bool {
+    for (curr, next) in points.iter().skip(1).zip(points.iter().skip(2)).step_by(2) {
+        if curr != next {
+            return false;
+        }
+    }
+
+    true
+}

@@ -11,7 +11,6 @@ pub(crate) struct Skill<'h> {
     pub(crate) strain_peaks: Vec<f32>,
     pub(crate) times: Vec<f32>,
     previous: VecDeque<DifficultyObject<'h>>,
-
     curr_strain: f32,
 }
 
@@ -23,30 +22,28 @@ impl<'h> Skill<'h> {
             strain_peaks: Vec::with_capacity(128),
             times: Vec::with_capacity(128),
             previous: VecDeque::with_capacity(kind.history_len()),
-
             curr_strain: 1.0,
         }
     }
 
     #[inline]
-    pub(crate) fn process_internal(&mut self, current: DifficultyObject<'h>) {
+    pub(crate) fn process_internal(&mut self, current: DifficultyObject<'h>, clock_rate: f32) {
         if self.previous.len() > self.kind.history_len() {
             self.previous.pop_back();
         }
 
-        self.process(&current);
-
+        self.process(&current, clock_rate);
         self.previous.push_front(current);
     }
 
     #[inline]
-    fn process(&mut self, current: &DifficultyObject) {
+    fn process(&mut self, current: &DifficultyObject, clock_rate: f32) {
         let strain_at = self
             .kind
             .strain_value_at(&mut self.curr_strain, current, &self.previous);
 
         self.strain_peaks.push(strain_at);
-        self.times.push(current.base.time);
+        self.times.push(current.base.time / clock_rate);
     }
 
     #[inline]

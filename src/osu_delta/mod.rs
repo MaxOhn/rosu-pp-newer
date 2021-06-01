@@ -62,6 +62,7 @@ fn difficulty_range_ar(ar: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rosu_pp::Beatmap;
     use tokio::fs::File;
 
     #[tokio::test]

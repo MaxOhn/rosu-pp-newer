@@ -1,6 +1,4 @@
-use super::{ControlPoint, ControlPointIter};
-
-use rosu_pp::Beatmap;
+use super::{Beatmap, ControlPoint, ControlPointIter};
 
 pub(crate) struct SliderState<'p> {
     control_points: ControlPointIter<'p>,
@@ -46,12 +44,9 @@ impl<'p> SliderState<'p> {
 
 #[cfg(test)]
 mod test {
-    use rosu_pp::{
-        parse::{DifficultyPoint, TimingPoint},
-        Beatmap,
-    };
+    use rosu_pp::parse::{DifficultyPoint, TimingPoint};
 
-    use super::SliderState;
+    use super::{Beatmap, SliderState};
 
     #[test]
     fn osu_slider_state() {

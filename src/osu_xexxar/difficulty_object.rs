@@ -32,8 +32,8 @@ impl<'h> DifficultyObject<'h> {
         let strain_time = delta.max(50.0);
 
         let pos = base.pos;
-        let travel_dist = prev.travel_dist;
-        let prev_cursor_pos = prev.end_pos;
+        let travel_dist = prev.travel_dist();
+        let prev_cursor_pos = prev.lazy_end_pos();
 
         let dist_vec = if base.is_spinner() {
             Pos2::zero()
@@ -44,7 +44,7 @@ impl<'h> DifficultyObject<'h> {
         let jump_dist = dist_vec.length();
 
         let angle = prev_prev.map(|prev_prev| {
-            let prev_prev_cursor_pos = prev_prev.end_pos;
+            let prev_prev_cursor_pos = prev_prev.lazy_end_pos();
 
             let v1 = prev_prev_cursor_pos - prev.pos;
             let v2 = pos - prev_cursor_pos;
