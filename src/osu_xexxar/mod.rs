@@ -65,6 +65,7 @@ mod tests {
     use tokio::fs::File;
 
     #[tokio::test]
+    #[ignore]
     async fn single() {
         let map_id = 2097898;
 

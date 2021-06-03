@@ -1,11 +1,14 @@
+mod angle_correction;
+use angle_correction::*;
+
+mod array_vec;
+use array_vec::ArrayVec;
+
 mod control_point_iter;
 use control_point_iter::{ControlPoint, ControlPointIter};
 
-mod curve;
-use curve::Curve;
-
-mod difficulty_object;
-use difficulty_object::DifficultyObject;
+// mod curve;
+// use curve::Curve;
 
 mod math_util;
 
@@ -18,17 +21,43 @@ use osu_object::OsuObject;
 mod pp;
 pub use pp::{OsuAttributeProvider, OsuPP};
 
-mod skill;
-use skill::Skill;
-
-mod skill_kind;
-use skill_kind::SkillKind;
-
 mod slider_state;
 use slider_state::SliderState;
 
 mod stars;
 pub use stars::stars;
+
+#[derive(Clone, Debug, Default)]
+pub struct DifficultyAttributes {
+    stars: f32,
+
+    tap_sr: f32,
+    tap_diff: f32,
+    stream_note_count: f32,
+    mash_tap_diff: f32,
+
+    finger_control_sr: f32,
+    finger_control_diff: f32,
+
+    aim_sr: f32,
+    aim_diff: f32,
+    aim_hidden_factor: f32,
+    combo_tps: Vec<f32>,
+    miss_tps: Vec<f32>,
+    miss_counts: Vec<f32>,
+    cheese_note_count: f32,
+    cheese_levels: Vec<f32>,
+    cheese_factors: Vec<f32>,
+
+    length: f32,
+    ar: f32,
+    od: f32,
+    max_combo: usize,
+
+    n_circles: u32,
+    n_sliders: u32,
+    n_spinners: u32,
+}
 
 #[inline]
 fn difficulty_range(val: f32, max: f32, avg: f32, min: f32) -> f32 {
@@ -67,9 +96,14 @@ mod tests {
 
     #[tokio::test]
     async fn single() {
-        let file = File::open("/home/max/Desktop/beatmaps/652234.osu")
-            .await
-            .unwrap();
+        let map_id = 2097898;
+
+        let file = File::open(format!(
+            "C:/Users/Max/Desktop/Coding/C#/osu-tools/cache/{}.osu",
+            map_id
+        ))
+        .await
+        .unwrap();
         let map = Beatmap::parse(file).await.unwrap();
 
         let result = OsuPP::new(&map).calculate();

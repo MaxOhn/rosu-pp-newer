@@ -4,6 +4,9 @@ version = "0.1.0"
 authors = ["MaxOhn <ohn.m@hotmail.de>"]
 edition = "2018"
 
+[dependencies.lazy_static]
+version = "1.4"
+
 [dependencies.rosu-pp]
 path = "../rosu-pp"
 # git = "https://github.com/MaxOhn/rosu-pp"

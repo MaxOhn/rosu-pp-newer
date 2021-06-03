@@ -1,5 +1,35 @@
-use super::stars;
-use rosu_pp::{osu::DifficultyAttributes, Beatmap, Mods, PpResult, StarResult};
+use std::f32::consts::{FRAC_PI_2, PI, SQRT_2};
+
+use crate::osu_delta::math_util::{logistic, pow_mean};
+
+use super::{
+    array_vec::ArrayVec,
+    math_util::{erfinv, linear_spaced, CubicInterpolation},
+    stars, DifficultyAttributes,
+};
+use rosu_pp::{Beatmap, Mods};
+
+#[derive(Clone, Debug)]
+pub struct PpResult {
+    pub pp: f32,
+    pub attributes: DifficultyAttributes,
+}
+
+impl PpResult {
+    #[inline]
+    pub fn pp(&self) -> f32 {
+        self.pp
+    }
+
+    #[inline]
+    pub fn stars(&self) -> f32 {
+        self.attributes.stars
+    }
+}
+
+const TOTAL_VALUE_EXPONENT: f32 = 1.5;
+const SKILL_TO_PP_EXPONENT: f32 = 2.7;
+const MISS_COUNT_LENIENCY: f32 = 0.5;
 
 /// Calculator for pp on osu!standard maps.
 ///
@@ -69,9 +99,7 @@ impl<'m> OsuPP<'m> {
     /// be sure to put them in here so that they don't have to be recalculated.
     #[inline]
     pub fn attributes(mut self, attributes: impl OsuAttributeProvider) -> Self {
-        if let Some(attributes) = attributes.attributes() {
-            self.attributes.replace(attributes);
-        }
+        self.attributes.replace(attributes.attributes());
 
         self
     }
@@ -232,18 +260,42 @@ impl<'m> OsuPP<'m> {
     }
 
     pub fn calculate(mut self) -> PpResult {
-        if self.attributes.is_none() {
-            let attributes = stars(self.map, self.mods, self.passed_objects)
-                .attributes()
-                .unwrap();
-            self.attributes.replace(attributes);
-        }
+        let attributes = match self.attributes.take() {
+            Some(attributes) => attributes,
+            None => stars(self.map, self.mods, self.passed_objects),
+        };
+
+        let great_window = 79.5 - 6.0 * attributes.od;
 
         // Make sure the hitresults and accuracy are set
         self.assert_hitresults();
 
+        let mut multiplier = 2.14;
+
+        let combo_based_miss_count = if attributes.n_sliders == 0 {
+            if let Some(combo) = self.combo.filter(|&combo| combo < attributes.max_combo) {
+                attributes.max_combo as f32 / combo as f32
+            } else {
+                0.0
+            }
+        } else {
+            let full_combo_threshold =
+                attributes.max_combo as f32 - 0.1 * attributes.n_sliders as f32;
+
+            if let Some(combo) = self
+                .combo
+                .filter(|&combo| (combo as f32) < full_combo_threshold)
+            {
+                full_combo_threshold as f32 / combo as f32
+            } else {
+                ((attributes.max_combo - self.combo.unwrap_or(0)) as f32
+                    / (0.1 * attributes.n_sliders as f32))
+                    .powi(3)
+            }
+        };
+
+        let effective_miss_count = combo_based_miss_count.max(self.n_misses as f32);
         let total_hits = self.total_hits() as f32;
-        let mut multiplier = 1.12;
 
         // NF penalty
         if self.mods.nf() {
@@ -252,156 +304,235 @@ impl<'m> OsuPP<'m> {
 
         // SO penalty
         if self.mods.so() {
-            let n_spinners = self.attributes.as_ref().unwrap().n_spinners;
+            let n_spinners = attributes.n_spinners;
             multiplier *= 1.0 - (n_spinners as f32 / total_hits).powf(0.85);
         }
 
-        let aim_value = self.compute_aim_value(total_hits);
-        let speed_value = self.compute_speed_value(total_hits);
-        let acc_value = self.compute_accuracy_value(total_hits);
+        let aim_value =
+            self.compute_aim_value(total_hits, &attributes, great_window, effective_miss_count);
+        let tap_value =
+            self.compute_tap_value(total_hits, &attributes, great_window, effective_miss_count);
+        let acc_value = self.compute_acc_value(&attributes, great_window, effective_miss_count);
 
-        let pp = (aim_value.powf(1.1) + speed_value.powf(1.1) + acc_value.powf(1.1))
-            .powf(1.0 / 1.1)
-            * multiplier;
-
-        let attributes = StarResult::Osu(self.attributes.unwrap());
+        let pp = [aim_value, tap_value, acc_value].powf_mean(TOTAL_VALUE_EXPONENT) * multiplier;
 
         PpResult { pp, attributes }
     }
 
-    fn compute_aim_value(&self, total_hits: f32) -> f32 {
-        let attributes = self.attributes.as_ref().unwrap();
-
-        // TD penalty
-        let raw_aim = if self.mods.td() {
-            attributes.aim_strain.powf(0.8)
-        } else {
-            attributes.aim_strain
-        };
-
-        let mut aim_value = (5.0 * (raw_aim / 0.0675).max(1.0) - 4.0).powi(3) / 100_000.0;
-
-        // Longer maps are worth more
-        let len_bonus = 0.95
-            + 0.4 * (total_hits / 2000.0).min(1.0)
-            + (total_hits > 2000.0) as u8 as f32 * 0.5 * (total_hits / 2000.0).log10();
-        aim_value *= len_bonus;
-
-        // Penalize misses
-        if self.n_misses > 0 {
-            aim_value *= 0.97
-                * (1.0 - (self.n_misses as f32 / total_hits).powf(0.775))
-                    .powi(self.n_misses as i32);
+    fn compute_aim_value(
+        &self,
+        total_hits: f32,
+        attributes: &DifficultyAttributes,
+        great_window: f32,
+        effective_miss_count: f32,
+    ) -> f32 {
+        if total_hits <= 1.0 {
+            return 0.0;
         }
 
-        // Combo scaling
-        if let Some(combo) = self.combo.filter(|_| attributes.max_combo > 0) {
-            aim_value *= ((combo as f32 / attributes.max_combo as f32).powf(0.8)).min(1.0);
+        let combo_tp_count = attributes.combo_tps.len();
+        let combo_percentage = linear_spaced(combo_tp_count, (combo_tp_count as f32).recip(), 1.0);
+
+        let max_combo = attributes.max_combo;
+        let combo = self.combo.unwrap_or(max_combo);
+
+        let score_combo_percentage = combo as f32 / max_combo as f32;
+        let combo_tp =
+            CubicInterpolation::new(&combo_percentage, &attributes.combo_tps, None, None)
+                .evaluate(score_combo_percentage);
+
+        let mut miss_tp =
+            CubicInterpolation::new(&attributes.miss_counts, &attributes.miss_tps, None, None)
+                .evaluate(effective_miss_count);
+
+        miss_tp = miss_tp.max(0.0);
+
+        let mut tp = pow_mean(combo_tp, miss_tp, 20.0);
+
+        if self.mods.hd() {
+            let hidden_factor = if attributes.ar > 10.75 {
+                1.0
+            } else if attributes.ar > 9.75 {
+                1.0 + (1.0 - (((attributes.ar - 9.75) * FRAC_PI_2).sin()).powi(2))
+                    * (attributes.aim_hidden_factor - 1.0)
+            } else {
+                attributes.aim_hidden_factor
+            };
+
+            tp *= hidden_factor;
         }
 
-        // AR bonus
-        let mut ar_factor = 0.0;
-        if attributes.ar > 10.33 {
-            ar_factor += 0.4 * (attributes.ar - 10.33);
+        // Account for cheesing
+        let modified_acc = self.modified_acc(attributes);
+        let acc_on_cheese_notes =
+            1.0 - (1.0 - modified_acc) * (total_hits / attributes.cheese_note_count).sqrt();
+
+        let acc_on_cheese_notes_positive = (acc_on_cheese_notes - 1.0).exp();
+
+        // println!(
+        //     "acc_on_cheese_notes_positive={}",
+        //     acc_on_cheese_notes_positive
+        // );
+
+        let ur_on_cheese_notes =
+            10.0 * great_window / (SQRT_2 * erfinv(acc_on_cheese_notes_positive));
+        let cheese_level = logistic(((ur_on_cheese_notes * attributes.aim_diff) - 3200.0) / 2000.0);
+
+        let cheese_factor = CubicInterpolation::new(
+            &attributes.cheese_levels,
+            &attributes.cheese_factors,
+            None,
+            None,
+        )
+        .evaluate(cheese_level);
+
+        if self.mods.td() {
+            tp = tp.min(1.47 * tp.powf(0.8));
+        }
+
+        let mut aim_value = tp_to_pp(tp * cheese_factor);
+
+        // penalize misses
+        aim_value *= 0.96_f32.powf((effective_miss_count - MISS_COUNT_LENIENCY).max(0.0));
+
+        // Buff long maps
+        aim_value *=
+            1.0 + (logistic((total_hits - 2800.0) / 500.0) - logistic(-2800.0 / 500.0)) * 0.22;
+
+        // Buff very high AR and low AR
+        let mut ar_factor = 1.0;
+
+        if attributes.ar > 10.0 {
+            ar_factor += (0.05 + 0.35 * ((PI * total_hits.min(1250.0)).sin() / 2500.0).powf(1.7))
+                * (attributes.ar - 10.0).powi(2);
         } else if attributes.ar < 8.0 {
             ar_factor += 0.01 * (8.0 - attributes.ar);
         }
-        aim_value *= 1.0 + ar_factor.min(ar_factor * total_hits / 1000.0);
 
-        // HD bonus
-        if self.mods.hd() {
-            aim_value *= 1.0 + 0.04 * (12.0 - attributes.ar);
-        }
+        aim_value *= ar_factor;
 
-        // FL bonus
         if self.mods.fl() {
             aim_value *= 1.0
                 + 0.35 * (total_hits / 200.0).min(1.0)
-                + (total_hits > 200.0) as u8 as f32 * 0.3 * ((total_hits - 200.0) / 300.0).min(1.0)
-                + (total_hits > 500.0) as u8 as f32 * (total_hits - 500.0) / 1200.0;
+                + (total_hits > 200.0) as u8 as f32
+                    * (0.3 * ((total_hits - 200.0) / 300.0).min(1.0)
+                        + (total_hits > 500.0) as u8 as f32 * (total_hits - 500.0) / 2000.0);
         }
 
-        // Scale with accuracy
-        aim_value *= 0.5 + self.acc.unwrap() / 2.0;
-        aim_value *= 0.98 + attributes.od * attributes.od / 2500.0;
+        // Scale the aim value down with accuracy
+        let acc_leniency = great_window * attributes.aim_diff / 300.0;
+        let acc_penalty = (0.09 / (self.acc.unwrap_or(1.0) - 1.3) + 0.3) * (acc_leniency + 1.5);
+
+        aim_value *= 0.2 + logistic(-((acc_penalty - 0.24953) / 0.18));
 
         aim_value
     }
 
-    fn compute_speed_value(&self, total_hits: f32) -> f32 {
-        let attributes = self.attributes.as_ref().unwrap();
-
-        let mut speed_value =
-            (5.0 * (attributes.speed_strain / 0.0675).max(1.0) - 4.0).powi(3) / 100_000.0;
-
-        // Longer maps are worth more
-        let len_bonus = 0.95
-            + 0.4 * (total_hits / 2000.0).min(1.0)
-            + (total_hits > 2000.0) as u8 as f32 * 0.5 * (total_hits / 2000.0).log10();
-        speed_value *= len_bonus;
-
-        // Penalize misses
-        if self.n_misses > 0 {
-            speed_value *= 0.97
-                * (1.0 - (self.n_misses as f32 / total_hits).powf(0.775))
-                    .powf((self.n_misses as f32).powf(0.875));
+    fn compute_tap_value(
+        &self,
+        total_hits: f32,
+        attributes: &DifficultyAttributes,
+        great_window: f32,
+        effective_miss_count: f32,
+    ) -> f32 {
+        if total_hits <= 1.0 {
+            return 0.0;
         }
 
-        // Combo scaling
-        if let Some(combo) = self.combo.filter(|_| attributes.max_combo > 0) {
-            speed_value *= ((combo as f32 / attributes.max_combo as f32).powf(0.8)).min(1.0);
-        }
+        let modified_acc = self.modified_acc(attributes);
 
-        // AR bonus
+        // println!(
+        //     "modified_acc={} | total_hits={} | stream_note_count={}",
+        //     modified_acc, total_hits, attributes.stream_note_count
+        // );
+
+        let acc_on_stream =
+            1.0 - (1.0 - modified_acc) * (total_hits / attributes.stream_note_count).sqrt();
+
+        let acc_on_streams_positive = (acc_on_stream - 1.0).exp();
+
+        // println!("acc_on_streams_positive={}", acc_on_streams_positive);
+
+        let ur_on_streams = 10.0 * great_window / (SQRT_2 * erfinv(acc_on_streams_positive));
+
+        let mash_level = logistic(((ur_on_streams * attributes.tap_diff) - 4000.0) / 1000.0);
+
+        let tap_skill =
+            mash_level * attributes.mash_tap_diff + (1.0 - mash_level) * attributes.tap_diff;
+
+        let mut tap_value = tap_skill_to_pp(tap_skill);
+
+        // Buff very high acc on streams
+        let acc_buff = ((acc_on_stream - 1.0) * 60.0).exp() * tap_value * 0.2;
+        tap_value += acc_buff;
+
+        // Scale tap value down with accuracy
+        let od_scale = logistic(16.0 - great_window) * 0.04;
+        let acc = self.acc.unwrap_or(1.0);
+        let acc_factor = 0.5
+            + 0.5
+                * ((logistic((acc - 0.9543 + 1.83 * od_scale) / 0.025 + od_scale)).powf(0.2)
+                    + logistic(-3.5));
+
+        tap_value *= acc_factor;
+
+        // Penalize misses and 50s exponentially
+        tap_value *= 0.93_f32.powf((effective_miss_count - MISS_COUNT_LENIENCY).max(0.0));
+
+        let n50 = self.n50.unwrap_or(0) as f32;
+        let exp = if n50 < total_hits / 500.0 {
+            0.5 * n50
+        } else {
+            n50 - total_hits / 500.0 * 0.5
+        };
+
+        tap_value *= 0.98_f32.powf(exp);
+
+        // Buff very high AR
+        let mut ar_factor = 1.0;
+
         if attributes.ar > 10.33 {
-            let ar_factor = 0.4 * (attributes.ar - 10.33);
-            speed_value *= 1.0 + ar_factor.min(ar_factor * total_hits / 1000.0);
+            let ar11_len_buff = 0.8 * (logistic(total_hits / 500.0) - 0.5);
+            ar_factor += ar11_len_buff * (attributes.ar - 10.33) / 0.67;
         }
 
-        // HD bonus
-        if self.mods.hd() {
-            speed_value *= 1.0 + 0.04 * (12.0 - attributes.ar);
-        }
+        tap_value *= ar_factor;
 
-        // Scaling the speed value with accuracy and OD
-        let od_factor = 0.95 + attributes.od * attributes.od / 750.0;
-        let acc_factor = self
-            .acc
-            .unwrap()
-            .powf((14.5 - attributes.od.max(8.0)) / 2.0);
-        speed_value *= od_factor * acc_factor;
-
-        // Penalize n50s
-        speed_value *= 0.98_f32.powf(
-            (self.n50.unwrap_or(0) as f32 >= total_hits / 500.0) as u8 as f32
-                * (self.n50.unwrap_or(0) as f32 - total_hits / 500.0),
-        );
-
-        speed_value
+        tap_value
     }
 
-    fn compute_accuracy_value(&self, total_hits: f32) -> f32 {
-        let attributes = self.attributes.as_ref().unwrap();
-        let n_circles = attributes.n_circles as f32;
-        let n300 = self.n300.unwrap_or(0) as f32;
-        let n100 = self.n100.unwrap_or(0) as f32;
-        let n50 = self.n50.unwrap_or(0) as f32;
+    fn compute_acc_value(
+        &self,
+        attributes: &DifficultyAttributes,
+        great_window: f32,
+        effective_miss_count: f32,
+    ) -> f32 {
+        let finger_control_diff = attributes.finger_control_diff;
+        let modified_acc = self.modified_acc(attributes);
+        let acc_on_circles = modified_acc - 0.003;
+        let acc_on_circles_positive = (acc_on_circles - 1.0).exp();
 
-        let better_acc_percentage = (n_circles > 0.0) as u8 as f32
-            * (((n300 - (total_hits - n_circles)) * 6.0 + n100 * 2.0 + n50) / (n_circles * 6.0))
-                .max(0.0);
+        let deviation_on_circles =
+            (great_window + 20.0) / (SQRT_2 * erfinv(acc_on_circles_positive));
 
-        let mut acc_value = 1.52163_f32.powf(attributes.od) * better_acc_percentage.powi(24) * 2.83;
+        let mut acc_value = deviation_on_circles.powf(-2.2) * finger_control_diff.sqrt();
 
-        // Bonus for many hitcircles
-        acc_value *= ((n_circles as f32 / 1000.0).powf(0.3)).min(1.15);
+        // scale acc pp with misses
+        acc_value *= 0.96_f32.powf((effective_miss_count - MISS_COUNT_LENIENCY).max(0.0));
 
-        // HD bonus
+        // nerf short maps
+        let len_factor = if attributes.length < 120.0 {
+            logistic((attributes.length - 300.0) / 60.0) + logistic(2.5) - logistic(-2.5)
+        } else {
+            logistic(attributes.length / 60.0)
+        };
+
+        acc_value *= len_factor;
+
         if self.mods.hd() {
             acc_value *= 1.08;
         }
 
-        // FL bonus
         if self.mods.fl() {
             acc_value *= 1.02;
         }
@@ -418,35 +549,44 @@ impl<'m> OsuPP<'m> {
         (self.n300.unwrap_or(0) + self.n100.unwrap_or(0) + self.n50.unwrap_or(0) + self.n_misses)
             .min(n_objects)
     }
+
+    #[inline]
+    fn modified_acc(&self, attributes: &DifficultyAttributes) -> f32 {
+        let n300 = self.n300.unwrap_or(0);
+        let n100 = self.n100.unwrap_or(0);
+        let n50 = self.n50.unwrap_or(0);
+        let total_hits = self.total_hits();
+
+        ((n300 - (total_hits - attributes.n_circles as usize)) * 3 + n100 * 2 + n50) as f32
+            / ((attributes.n_circles + 2) * 3) as f32
+    }
+}
+
+#[inline]
+fn tp_to_pp(tp: f32) -> f32 {
+    tp.powf(SKILL_TO_PP_EXPONENT) * 0.118
+}
+
+#[inline]
+fn tap_skill_to_pp(tap_skill: f32) -> f32 {
+    tap_skill.powf(SKILL_TO_PP_EXPONENT) * 0.115
 }
 
 pub trait OsuAttributeProvider {
-    fn attributes(self) -> Option<DifficultyAttributes>;
+    fn attributes(self) -> DifficultyAttributes;
 }
 
 impl OsuAttributeProvider for DifficultyAttributes {
     #[inline]
-    fn attributes(self) -> Option<DifficultyAttributes> {
-        Some(self)
-    }
-}
-
-impl OsuAttributeProvider for StarResult {
-    #[inline]
-    fn attributes(self) -> Option<DifficultyAttributes> {
-        #[allow(irrefutable_let_patterns)]
-        if let Self::Osu(attributes) = self {
-            Some(attributes)
-        } else {
-            None
-        }
+    fn attributes(self) -> DifficultyAttributes {
+        self
     }
 }
 
 impl OsuAttributeProvider for PpResult {
     #[inline]
-    fn attributes(self) -> Option<DifficultyAttributes> {
-        self.attributes.attributes()
+    fn attributes(self) -> DifficultyAttributes {
+        self.attributes
     }
 }
 
