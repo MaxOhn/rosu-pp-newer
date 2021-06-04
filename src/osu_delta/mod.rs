@@ -7,6 +7,12 @@ use array_vec::ArrayVec;
 mod control_point_iter;
 use control_point_iter::{ControlPoint, ControlPointIter};
 
+mod hit_probabilities;
+use hit_probabilities::HitProbabilities;
+
+mod interpolations;
+use interpolations::{CubicInterpolation, TricubicInterpolation};
+
 mod math_util;
 
 mod movement;

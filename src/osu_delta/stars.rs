@@ -1,14 +1,13 @@
 use crate::osu_delta::math_util::try_expand_find_root_brent;
 
-use super::math_util::{
-    calculate_hit_prob, logistic, try_find_root_bisection, try_find_root_brent, PoissonBinomial,
-};
+use super::math_util::{logistic, try_find_root_bisection, try_find_root_brent, PoissonBinomial};
 use super::{
-    difficulty_range_ar, difficulty_range_od, ArrayVec, DifficultyAttributes, Movement, OsuObject,
-    SliderState,
+    difficulty_range_ar, difficulty_range_od, ArrayVec, DifficultyAttributes, HitProbabilities,
+    Movement, OsuObject, SliderState,
 };
 
 use rosu_pp::{Beatmap, Mods};
+use std::cmp::Ordering;
 use std::collections::VecDeque;
 
 const OBJECT_RADIUS: f32 = 64.0;
@@ -79,6 +78,7 @@ pub fn stars(
         &tap_attributes.strain_history,
         &note_densities,
         radius,
+        mods.hd(),
     );
 
     let tap_sr = TAP_MULTIPLIER * tap_attributes.difficulty.powf(SR_EXPONENT);
@@ -133,15 +133,14 @@ fn calculate_aim_attributes(
     strain_history: &[[f32; 4]],
     note_densities: &[f32],
     radius: f32,
+    hidden: bool,
 ) -> AimAttributes {
-    let movements = create_movements(hit_objects, clock_rate, strain_history, false, None, radius);
-
-    let movement_hidden = create_movements(
+    let movements = create_movements(
         hit_objects,
         clock_rate,
         strain_history,
-        true,
-        Some(note_densities),
+        false,
+        note_densities,
         radius,
     );
 
@@ -164,9 +163,23 @@ fn calculate_aim_attributes(
     let mut map_hit_probs =
         HitProbabilities::new(&movements, DEFAULT_CHEESE_LEVEL, combo_section_amount);
     let fc_prob_tp = calculate_fc_prob_tp(&movements, DEFAULT_CHEESE_LEVEL);
-    let fc_prob_tp_hidden = calculate_fc_prob_tp(&movement_hidden, DEFAULT_CHEESE_LEVEL);
 
-    let hidden_factor = fc_prob_tp_hidden / fc_prob_tp;
+    let hidden_factor = if hidden {
+        let movement_hidden = create_movements(
+            hit_objects,
+            clock_rate,
+            strain_history,
+            true,
+            note_densities,
+            radius,
+        );
+
+        let fc_prob_tp_hidden = calculate_fc_prob_tp(&movement_hidden, DEFAULT_CHEESE_LEVEL);
+
+        fc_prob_tp_hidden / fc_prob_tp
+    } else {
+        1.0
+    };
 
     let combo_tps = calculate_combo_tps(&mut map_hit_probs, combo_section_amount);
     let fc_time_tp = *combo_tps.last().expect("no last");
@@ -200,83 +213,74 @@ struct AimAttributes {
     cheese_factor: Vec<f32>,
 }
 
+#[inline]
 fn get_cheese_note_count(movements: &[Movement], tp: f32) -> f32 {
-    let mut count = 0.0;
-
-    for movement in movements {
-        count += logistic((movement.index_of_perf / tp - 0.6) * 15.0) * movement.cheesability;
-    }
-
-    count
+    movements
+        .iter()
+        .map(|movement| {
+            logistic((movement.index_of_perf / tp - 0.6) * 15.0) * movement.cheesability
+        })
+        .sum()
 }
 
+#[inline]
 fn calculate_cheese_levels_cheese_factors(
     movements: &[Movement],
     fc_prob_tp: f32,
 ) -> (Vec<f32>, Vec<f32>) {
-    let mut cheese_levels = vec![0.0; CHEESE_LEVEL_COUNT];
-    let mut cheese_factors = vec![0.0; CHEESE_LEVEL_COUNT];
+    (0..CHEESE_LEVEL_COUNT)
+        .map(|i| {
+            let cheese_level = i as f32 / (CHEESE_LEVEL_COUNT - 1) as f32;
+            let cheese_factor = calculate_fc_prob_tp(movements, cheese_level) / fc_prob_tp;
 
-    for i in 0..CHEESE_LEVEL_COUNT {
-        let cheese_level = i as f32 / (CHEESE_LEVEL_COUNT - 1) as f32;
-        cheese_levels[i] = cheese_level;
-        cheese_factors[i] = calculate_fc_prob_tp(movements, cheese_level) / fc_prob_tp;
-    }
-
-    (cheese_levels, cheese_factors)
+            (cheese_level, cheese_factor)
+        })
+        .unzip()
 }
 
+#[inline]
 fn calculate_miss_tps_misscount(
     movements: &[Movement],
     fc_time_tp: f32,
     section_amount: usize,
 ) -> (Vec<f32>, Vec<f32>) {
-    let mut miss_tps = vec![0.0; section_amount];
-    let mut miss_counts = vec![0.0; section_amount];
     let fc_prob = calculate_fc_prob(movements, fc_time_tp, DEFAULT_CHEESE_LEVEL);
 
-    for i in 0..section_amount {
-        let miss_tp = fc_time_tp * (1.0 - (i as f32).powf(1.5) * 0.005);
-        let miss_probs = get_miss_probs(movements, miss_tp);
-        miss_tps[i] = miss_tp;
-        miss_counts[i] = get_miss_count(fc_prob, &miss_probs);
-    }
+    (0..section_amount)
+        .map(|i| {
+            let miss_tp = fc_time_tp * (1.0 - (i as f32).powf(1.5) * 0.005);
+            let miss_probs = get_miss_probs(movements, miss_tp);
+            let miss_count = get_miss_count(fc_prob, miss_probs);
 
-    (miss_tps, miss_counts)
+            (miss_tp, miss_count)
+        })
+        .unzip()
 }
 
-fn get_miss_probs(movements: &[Movement], tp: f32) -> Vec<f32> {
-    let mut miss_probs = vec![0.0; movements.len()];
-
-    for i in 0..movements.len() {
-        let movement = &movements[i];
-        miss_probs[i] =
-            1.0 - HitProbabilities::calculate_cheese_hit_prob(&movement, tp, DEFAULT_CHEESE_LEVEL);
-    }
-
-    miss_probs
+#[inline]
+fn get_miss_probs<'m>(movements: &'m [Movement], tp: f32) -> impl Iterator<Item = f32> + 'm {
+    movements.iter().map(move |movement| {
+        1.0 - HitProbabilities::calculate_cheese_hit_prob(movement, tp, DEFAULT_CHEESE_LEVEL)
+    })
 }
 
-fn get_miss_count(p: f32, miss_probs: &[f32]) -> f32 {
-    if miss_probs.iter().sum::<f32>().abs() < f32::EPSILON {
-        return 0.0;
-    }
+fn get_miss_count(p: f32, miss_probs: impl Iterator<Item = f32>) -> f32 {
+    let distribution = match PoissonBinomial::new(miss_probs) {
+        Some(distribution) => distribution,
+        None => return 0.0,
+    };
 
-    let distribution = PoissonBinomial::new(miss_probs);
     let cdf_minus_prob = |miss_count| distribution.cdf(miss_count) - p;
 
     try_expand_find_root_brent(cdf_minus_prob, -100.0, 1000.0, 1e-8, 100, 1.6, 100)
         .expect("no root")
 }
 
+#[inline]
 fn calculate_combo_tps(hit_probs: &mut HitProbabilities, section_amount: usize) -> Vec<f32> {
-    let mut combo_tps = vec![0.0; section_amount];
-
-    for i in 1..=section_amount {
-        combo_tps[i - 1] = calculate_fc_time_tp(hit_probs, i);
-    }
-
-    combo_tps
+    (1..=section_amount)
+        .map(|i| calculate_fc_time_tp(hit_probs, i))
+        .collect()
 }
 
 fn calculate_fc_time_tp(hit_probs: &mut HitProbabilities, section_count: usize) -> f32 {
@@ -305,6 +309,16 @@ fn calculate_fc_time_tp(hit_probs: &mut HitProbabilities, section_count: usize) 
     .expect("no root")
 }
 
+fn calculate_fc_prob(movements: &[Movement], tp: f32, cheese_level: f32) -> f32 {
+    let mut fc_prob = 1.0;
+
+    for movement in movements {
+        fc_prob *= HitProbabilities::calculate_cheese_hit_prob(movement, tp, cheese_level);
+    }
+
+    fc_prob
+}
+
 fn calculate_fc_prob_tp(movements: &[Movement], cheese_level: f32) -> f32 {
     let fc_prob_tp_min = calculate_fc_prob(movements, TP_MIN, cheese_level);
 
@@ -331,167 +345,12 @@ fn calculate_fc_prob_tp(movements: &[Movement], cheese_level: f32) -> f32 {
     .expect("no root")
 }
 
-fn calculate_fc_prob(movements: &[Movement], tp: f32, cheese_level: f32) -> f32 {
-    let mut fc_prob = 1.0;
-
-    for movement in movements {
-        fc_prob *= HitProbabilities::calculate_cheese_hit_prob(movement, tp, cheese_level);
-    }
-
-    fc_prob
-}
-
-#[derive(Copy, Clone)]
-struct SkillData {
-    expected_time: f32,
-    fc_prob: f32,
-}
-
-impl Default for SkillData {
-    fn default() -> Self {
-        Self {
-            expected_time: 0.0,
-            fc_prob: 1.0,
-        }
-    }
-}
-
-use std::collections::HashMap;
-
-struct MapSectionCache<'m> {
-    cache: HashMap<F32, SkillData>,
-    cheese_level: f32,
-    start_t: f32,
-    end_t: f32,
-    movements: &'m [Movement],
-}
-
-#[derive(Copy, Clone, PartialEq)]
-struct F32(f32);
-
-impl Eq for F32 {}
-
-impl Hash for F32 {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write_u32(self.0 as u32);
-        state.finish();
-    }
-}
-
-impl<'m> MapSectionCache<'m> {
-    fn new(movements: &'m [Movement], cheese_level: f32, start_t: f32, end_t: f32) -> Self {
-        Self {
-            movements,
-            start_t,
-            end_t,
-            cheese_level,
-            cache: HashMap::new(),
-        }
-    }
-
-    fn evaluate(&mut self, tp: f32) -> SkillData {
-        let mut result = SkillData::default();
-
-        if self.movements.is_empty() {
-            return result;
-        }
-
-        let key = F32(tp);
-
-        if let Some(result) = self.cache.get(&key) {
-            return *result;
-        }
-
-        for movement in self.movements {
-            let mut hit_prob =
-                HitProbabilities::calculate_cheese_hit_prob(movement, tp, self.cheese_level)
-                    + 1e-10;
-            hit_prob = 1.0 - ((1.0 - hit_prob + 0.25).sqrt() - 0.5);
-
-            result.expected_time = (result.expected_time + movement.raw_movement_time) / hit_prob;
-            result.fc_prob *= hit_prob;
-        }
-
-        self.cache.insert(key, result);
-
-        result
-    }
-}
-
-struct HitProbabilities<'m> {
-    sections: Vec<MapSectionCache<'m>>,
-}
-
-impl<'m> HitProbabilities<'m> {
-    fn new(movements: &'m [Movement], cheese_level: f32, difficulty_count: usize) -> Self {
-        let mut sections = Vec::with_capacity(difficulty_count);
-
-        for i in 0..difficulty_count {
-            let start = movements.len() * i / difficulty_count;
-            let end = movements.len() * (i + 1) / difficulty_count - 1;
-            let start_t = movements[start].time;
-            let end_t = movements[end].time;
-
-            sections.push(MapSectionCache::new(
-                &movements[start..end + 1],
-                cheese_level,
-                start_t,
-                end_t,
-            ));
-        }
-
-        Self { sections }
-    }
-
-    fn min_expected_time_for_section_count(&mut self, tp: f32, section_count: usize) -> f32 {
-        let mut fc_time = f32::INFINITY;
-        let section_data: Vec<_> = self.sections.iter_mut().map(|s| s.evaluate(tp)).collect();
-
-        for i in 0..=self.sections.len() - section_count {
-            fc_time = fc_time.min(
-                expected_fc_time(&section_data, i, section_count) - self.length(i, section_count),
-            );
-        }
-
-        fc_time
-    }
-
-    #[inline]
-    fn length(&self, start: usize, section_count: usize) -> f32 {
-        self.sections[start + section_count - 1].end_t - self.sections[start].start_t
-    }
-
-    fn calculate_cheese_hit_prob(movement: &Movement, tp: f32, cheese_level: f32) -> f32 {
-        let mut per_movement_cheese_level = cheese_level;
-
-        if movement.ends_on_slider {
-            per_movement_cheese_level = 0.5 * cheese_level + 0.5;
-        }
-
-        let cheese_mt =
-            movement.movement_time * (1.0 + per_movement_cheese_level * movement.cheesable_ratio);
-
-        calculate_hit_prob(movement.dist, cheese_mt, tp)
-    }
-}
-
-fn expected_fc_time(section_data: &[SkillData], start: usize, count: usize) -> f32 {
-    let mut fc_time = 15.0;
-
-    for i in start..start + count {
-        fc_time /= section_data[i].fc_prob;
-        fc_time += section_data[i].expected_time;
-    }
-
-    fc_time
-}
-
 fn create_movements(
     hit_objects: &[OsuObject],
     clock_rate: f32,
     strain_history: &[[f32; 4]],
     hidden: bool,
-    note_densities: Option<&[f32]>,
+    note_densities: &[f32],
     radius: f32,
 ) -> Vec<Movement> {
     let mut movements = Movement::extract_movement(&hit_objects[0]);
@@ -504,22 +363,21 @@ fn create_movements(
         let obj_next = hit_objects.get(i + 1);
         let tap_strain = &strain_history[i];
 
-        let density = note_densities.filter(|_| hidden).map(|d| d[i]);
+        let note_density = hidden.then(|| note_densities[i]);
 
-        let new_movements = Movement::extract_movement_complete(
+        Movement::extract_movement_complete(
+            &mut movements,
             obj_neg2,
             obj_prev,
             obj_curr,
             obj_next,
-            Some(tap_strain),
+            tap_strain,
             clock_rate,
             hidden,
-            density,
+            note_density,
             obj_neg4,
             radius,
         );
-
-        movements.extend(new_movements);
     }
 
     movements
@@ -530,11 +388,12 @@ fn calculate_finger_control_diff(hit_objects: &[OsuObject], clock_rate: f32) -> 
     let mut curr_strain = 0.0;
     let mut prev_strain_time = 0.0;
     let mut repeat_strain_count = 1;
-    let mut strain_history = Vec::new();
+
+    let mut strain_history = Vec::with_capacity(hit_objects.len());
     strain_history.push(0.0);
 
-    for i in 1..hit_objects.len() {
-        let curr_time = hit_objects[i].time / 1000.0;
+    for h in hit_objects.iter().skip(1) {
+        let curr_time = h.time / 1000.0;
         let delta_time = (curr_time - prev_time) / clock_rate;
         let strain_time = delta_time.max(0.046875);
         let strain_decay_base = 0.9_f32.powf(strain_time.min(0.2).recip());
@@ -542,13 +401,14 @@ fn calculate_finger_control_diff(hit_objects: &[OsuObject], clock_rate: f32) -> 
         curr_strain *= strain_decay_base.powf(delta_time);
         strain_history.push(curr_strain);
         let mut strain = 0.1 / strain_time;
+
         if (strain_time - prev_strain_time).abs() > 0.004 {
             repeat_strain_count = 1;
         } else {
             repeat_strain_count += 1;
         }
 
-        if hit_objects[i].is_slider() {
+        if h.is_slider() {
             strain /= 2.0;
         }
 
@@ -568,8 +428,8 @@ fn calculate_finger_control_diff(hit_objects: &[OsuObject], clock_rate: f32) -> 
     let mut diff = 0.0;
     let k: f32 = 0.95;
 
-    for i in 0..hit_objects.len() {
-        diff += strain_history[i] * k.powi(i as i32);
+    for (i, strain) in strain_history.into_iter().enumerate() {
+        diff += strain * k.powi(i as i32);
     }
 
     diff * (1.0 - k) * 1.1
@@ -609,14 +469,21 @@ struct TapAttributes {
 }
 
 fn calculate_streamness_mask(hit_objects: &[OsuObject], skill: f32, clock_rate: f32) -> Vec<f32> {
-    let mut streamness_mask = vec![0.0; hit_objects.len()];
+    let mut streamness_mask = Vec::with_capacity(hit_objects.len());
+    streamness_mask.push(0.0);
 
     let stream_time_threshold = skill.powf(-2.7 / 3.2);
 
-    for i in 1..hit_objects.len() {
-        let t = (hit_objects[i].time - hit_objects[i - 1].time) / 1000.0 / clock_rate;
-        streamness_mask[i] = 1.0 - logistic((t / stream_time_threshold - 1.0) * 15.0);
-    }
+    let iter = hit_objects
+        .iter()
+        .zip(hit_objects.iter().skip(1))
+        .map(|(prev, curr)| {
+            let t = (curr.time - prev.time) / 1000.0 / clock_rate;
+
+            1.0 - logistic((t / stream_time_threshold - 1.0) * 15.0)
+        });
+
+    streamness_mask.extend(iter);
 
     streamness_mask
 }
@@ -624,9 +491,6 @@ fn calculate_streamness_mask(hit_objects: &[OsuObject], skill: f32, clock_rate: 
 // Four elements, evenly spaced between 2.3 and -2.8,
 // then pointwise applied the exp function on
 const DECAY_COEFFS: [f32; 4] = [9.97418, 1.82212, 0.332871, 0.0608101];
-
-use std::cmp::Ordering;
-use std::hash::Hash;
 
 const SPACED_BUFF_FACTOR: f32 = 0.1;
 const TIMESCALE_FACTOR: [f32; 4] = [1.02, 1.02, 1.05, 1.15];
@@ -637,7 +501,11 @@ fn calculate_tap_strain(
     clock_rate: f32,
     radius: f32,
 ) -> (Vec<[f32; 4]>, f32) {
-    let mut strain_history = vec![[0.0; 4]; 2];
+    let mut strain_history = Vec::with_capacity(hit_objects.len());
+
+    strain_history.push([0.0; 4]);
+    strain_history.push([0.0; 4]);
+
     let mut curr_strain = [0.0; 4];
 
     let mut prev_prev_time = hit_objects[0].time / 1000.0;
@@ -675,28 +543,27 @@ fn calculate_tap_strain(
         prev_time = curr_time;
     }
 
-    let mut strain_result = [0.0; 4];
+    let mut strain_sum = 0.0;
+    let mut single_strain_history = Vec::with_capacity(hit_objects.len());
 
-    for j in 0..1 {
-        let mut single_strain_history = vec![0.0; hit_objects.len()];
+    for j in 0..4 {
+        let iter = (0..hit_objects.len()).map(|i| strain_history[i][j]);
 
-        for i in 0..hit_objects.len() {
-            single_strain_history[i] = strain_history[i][j];
-        }
-
+        single_strain_history.extend(iter);
         single_strain_history.sort_unstable_by(|a, b| b.partial_cmp(&a).unwrap());
 
         let mut single_strain_result = 0.0;
         let k = 1.0 - 0.04 * DECAY_COEFFS[j].sqrt();
 
-        for i in 0..hit_objects.len() {
-            single_strain_result += single_strain_history[i] * k.powi(i as i32);
+        for (i, strain) in single_strain_history.drain(..).enumerate() {
+            single_strain_result += strain * k.powi(i as i32);
         }
 
-        strain_result[j] = single_strain_result * (1.0 - k) * TIMESCALE_FACTOR[j];
+        let term = single_strain_result * (1.0 - k) * TIMESCALE_FACTOR[j];
+        strain_sum += term * term;
     }
 
-    let diff = strain_result.powi_mean(2);
+    let diff = (strain_sum / 4.0).sqrt();
 
     (strain_history, diff)
 }
@@ -714,7 +581,7 @@ fn calculate_spacedness(d: f32) -> f32 {
 }
 
 fn note_density(hit_objects: &[OsuObject], preempt: f32) -> Vec<f32> {
-    let mut note_densities = Vec::new();
+    let mut note_densities = Vec::with_capacity(hit_objects.len());
     let mut window = VecDeque::new();
 
     let mut next = 0;

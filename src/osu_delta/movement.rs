@@ -35,33 +35,26 @@ impl Movement {
         }
     }
 
+    #[inline]
     pub(crate) fn extract_movement(h: &OsuObject) -> Vec<Self> {
-        let init_time = h.time / 1000.0;
-        let mut movement_with_nested = vec![Self::empty(init_time)];
-
-        if h.nested_object_count > 0 {
-            let extra_nested_count = h.nested_object_count - 1;
-
-            for _ in 0..extra_nested_count {
-                movement_with_nested.push(Self::empty(init_time));
-            }
-        }
-
-        movement_with_nested
+        std::iter::repeat_with(|| Self::empty(h.time / 1000.0))
+            .take(1 + h.nested_object_count.saturating_sub(1))
+            .collect()
     }
 
     pub(crate) fn extract_movement_complete(
+        movements: &mut Vec<Self>,
         obj_neg2: Option<&OsuObject>,
         obj_prev: &OsuObject,
         obj_curr: &OsuObject,
         obj_next: Option<&OsuObject>,
-        tap_strain: Option<&[f32; 4]>,
+        tap_strain: &[f32; 4],
         clock_rate: f32,
         hidden: bool,
         note_density: Option<f32>,
         obj_neg4: Option<&OsuObject>,
         radius: f32,
-    ) -> Vec<Self> {
+    ) {
         let note_density = note_density.unwrap_or(0.0);
         let movement_time = obj_curr.time / 1000.0;
 
@@ -74,7 +67,7 @@ impl Movement {
         if obj_curr.is_spinner() || obj_prev.is_spinner() {
             movement.movement_time = 1.0;
 
-            return vec![movement];
+            return movements.push(movement);
         }
 
         let obj_neg2 = obj_neg2.filter(|h| !h.is_spinner());
@@ -242,7 +235,7 @@ impl Movement {
         // Correction #4
         let mut tap_correction = 0.0;
 
-        if let Some(tap_strain) = tap_strain.filter(|_| d_prev_curr > 0.0) {
+        if d_prev_curr > 0.0 {
             tap_correction = logistic((tap_strain.powi_mean(2) / ip_prev_curr - 1.34) / 0.1) * 0.15;
         }
 
@@ -351,15 +344,12 @@ impl Movement {
         movement.cheesability = cheesability_early + cheesability_late;
         movement.cheesable_ratio = (time_early + time_late) / (t_prev_curr + 1e-10);
 
-        let mut movement_with_nested = vec![movement];
+        movements.push(movement);
 
         let extra_nested_count = obj_curr.nested_object_count.saturating_sub(1);
 
-        for _ in 0..extra_nested_count {
-            movement_with_nested.push(Movement::empty(movement_time));
-        }
-
-        movement_with_nested
+        movements.reserve(extra_nested_count);
+        movements.extend((0..extra_nested_count).map(|_| Self::empty(movement_time)));
     }
 }
 

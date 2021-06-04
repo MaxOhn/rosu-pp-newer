@@ -4,8 +4,8 @@ use crate::osu_delta::math_util::{logistic, pow_mean};
 
 use super::{
     array_vec::ArrayVec,
-    math_util::{erfinv, linear_spaced, CubicInterpolation},
-    stars, DifficultyAttributes,
+    math_util::{erfinv, linear_spaced},
+    stars, CubicInterpolation, DifficultyAttributes,
 };
 use rosu_pp::{Beatmap, Mods};
 

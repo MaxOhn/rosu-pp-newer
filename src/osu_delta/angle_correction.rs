@@ -1,4 +1,4 @@
-use super::math_util::{CubicInterpolation, TricubicInterpolation};
+use super::{CubicInterpolation, TricubicInterpolation};
 
 pub const FLOW_NEG2_VALUES: [[[f32; 5]; 6]; 6] = [
     [
@@ -338,22 +338,13 @@ impl AngleCorrection {
         x *= dist2scale;
         y *= dist2scale;
 
-        // println!("x={} | y={}", x, y);
-
         let angle = y.atan2(x).abs();
         let dist2 = x.hypot(y);
         let max_val = self.max.as_ref().map_or(1.0, |max| max.evaluate(dist1));
         let min_val = self.min.as_ref().map_or(0.0, |min| min.evaluate(dist1));
         let scale = max_val - min_val;
 
-        // println!(
-        //     "angle={} | dist2={} | max={} | min={} | scale={}",
-        //     angle, dist2, max_val, min_val, scale
-        // );
-
         let interpolation = self.interpolation.evaluate(dist1, dist2, angle);
-
-        // println!("interpolation={}", interpolation);
 
         min_val + scale * interpolation.clamp(0.0, 1.0)
     }
