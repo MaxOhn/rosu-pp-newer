@@ -1,11 +1,9 @@
-use super::math_util;
-
 use rosu_pp::{
     parse::{
         DifficultyPoint, HitObject, HitObjectKind, ParseError, ParseResult, PathType, Pos2,
         TimingPoint,
     },
-    GameMode, Mods,
+    Beatmap as Beatmap_, GameMode, Mods,
 };
 
 use std::cmp::Ordering;
@@ -76,7 +74,6 @@ macro_rules! parse_general_body {
     ($self:ident, $reader:ident, $buf:ident, $section:ident) => {{
         let mut mode = None;
         let mut empty = true;
-        let mut stack_leniency = None;
 
         while read_line!($reader, $buf)? != 0 {
             let line = line_prepare!($buf);
@@ -100,15 +97,10 @@ macro_rules! parse_general_body {
                 };
             }
 
-            if key == "StackLeniency" {
-                stack_leniency = Some(value.parse()?);
-            }
-
             $buf.clear();
         }
 
-        $self.mode = mode.unwrap_or(GameMode::STD);
-        $self.stack_leniency = stack_leniency.unwrap_or(0.7);
+        $self.inner.mode = mode.unwrap_or(GameMode::STD);
 
         Ok(empty)
     }};
@@ -134,6 +126,60 @@ macro_rules! parse_general {
             section: &mut Section,
         ) -> ParseResult<bool> {
             parse_general_body!(self, reader, buf, section)
+        }
+    };
+}
+
+macro_rules! parse_metadata_body {
+    ($self:ident, $reader:ident, $buf:ident, $section:ident) => {{
+        let mut creator = None;
+        let mut empty = true;
+
+        while read_line!($reader, $buf)? != 0 {
+            let line = line_prepare!($buf);
+
+            if line.starts_with('[') && line.ends_with(']') {
+                *$section = Section::from_str(&line[1..line.len() - 1]);
+                empty = false;
+                $buf.clear();
+                break;
+            }
+
+            let (key, value) = split_colon(&line).ok_or(ParseError::BadLine)?;
+
+            if key == "Creator" {
+                creator.replace(value.to_owned());
+            }
+
+            $buf.clear();
+        }
+
+        $self.creator = creator.unwrap_or_else(String::new);
+
+        Ok(empty)
+    }};
+}
+
+macro_rules! parse_metadata {
+    ($reader:ident<$inner:ident>) => {
+        fn parse_metadata<R: $inner>(
+            &mut self,
+            reader: &mut $reader<R>,
+            buf: &mut String,
+            section: &mut Section,
+        ) -> ParseResult<bool> {
+            parse_metadata_body!(self, reader, buf, section)
+        }
+    };
+
+    (async $reader:ident<$inner:ident>) => {
+        async fn parse_metadata<R: $inner + Unpin>(
+            &mut self,
+            reader: &mut $reader<R>,
+            buf: &mut String,
+            section: &mut Section,
+        ) -> ParseResult<bool> {
+            parse_metadata_body!(self, reader, buf, section)
         }
     };
 }
@@ -174,12 +220,12 @@ macro_rules! parse_difficulty_body {
             $buf.clear();
         }
 
-        $self.od = next_field!(od, "od");
-        $self.cs = next_field!(cs, "cs");
-        $self.hp = next_field!(hp, "hp");
-        $self.ar = ar.unwrap_or($self.od);
-        $self.sv = next_field!(sv, "sv");
-        $self.tick_rate = next_field!(tick_rate, "sv");
+        $self.inner.od = next_field!(od, "od");
+        $self.inner.cs = next_field!(cs, "cs");
+        $self.inner.hp = next_field!(hp, "hp");
+        $self.inner.ar = ar.unwrap_or($self.inner.od);
+        $self.inner.sv = next_field!(sv, "sv");
+        $self.inner.tick_rate = next_field!(tick_rate, "sv");
 
         Ok(empty)
     }};
@@ -265,7 +311,7 @@ macro_rules! parse_timingpoints_body {
                     speed_multiplier: -100.0 / beat_len,
                 };
 
-                $self.difficulty_points.push(point);
+                $self.inner.difficulty_points.push(point);
 
                 if time < prev_diff {
                     unsorted_difficulties = true;
@@ -273,7 +319,10 @@ macro_rules! parse_timingpoints_body {
                     prev_diff = time;
                 }
             } else {
-                $self.timing_points.push(TimingPoint { time, beat_len });
+                $self
+                    .inner
+                    .timing_points
+                    .push(TimingPoint { time, beat_len });
 
                 if time < prev_time {
                     unsorted_timings = true;
@@ -286,11 +335,11 @@ macro_rules! parse_timingpoints_body {
         }
 
         if unsorted_timings {
-            sort!($self.timing_points);
+            sort!($self.inner.timing_points);
         }
 
         if unsorted_difficulties {
-            sort!($self.difficulty_points);
+            sort!($self.inner.difficulty_points);
         }
 
         Ok(empty)
@@ -351,7 +400,7 @@ macro_rules! parse_hitobjects_body {
 
             validate_float!(time);
 
-            if !$self.hit_objects.is_empty() && time < prev_time {
+            if !$self.inner.hit_objects.is_empty() && time < prev_time {
                 unsorted = true;
             }
 
@@ -359,11 +408,11 @@ macro_rules! parse_hitobjects_body {
             let sound = split.next().map(str::parse).transpose()?.unwrap_or(0);
 
             let kind = if kind & Self::CIRCLE_FLAG > 0 {
-                $self.n_circles += 1;
+                $self.inner.n_circles += 1;
 
                 HitObjectKind::Circle
             } else if kind & Self::SLIDER_FLAG > 0 {
-                $self.n_sliders += 1;
+                $self.inner.n_sliders += 1;
 
                 let mut curve_points = Vec::with_capacity(4);
                 curve_points.push(pos);
@@ -385,7 +434,7 @@ macro_rules! parse_hitobjects_body {
                 match path_type {
                     PathType::Linear if curve_points.len() % 2 == 0 => {
                         // Assert that the points are of the form A|B|B|C|C|E
-                        if math_util::valid_linear(&curve_points) {
+                        if valid_linear(&curve_points) {
                             for i in (2..curve_points.len() - 1).rev().step_by(2) {
                                 curve_points.remove(i);
                             }
@@ -394,7 +443,7 @@ macro_rules! parse_hitobjects_body {
                         }
                     }
                     PathType::PerfectCurve if curve_points.len() == 3 => {
-                        if math_util::is_linear(curve_points[0], curve_points[1], curve_points[2]) {
+                        if is_linear(curve_points[0], curve_points[1], curve_points[2]) {
                             path_type = PathType::Linear;
                         }
                     }
@@ -437,12 +486,12 @@ macro_rules! parse_hitobjects_body {
                     }
                 }
             } else if kind & Self::SPINNER_FLAG > 0 {
-                $self.n_spinners += 1;
+                $self.inner.n_spinners += 1;
                 let end_time = next_field!(split.next(), "spinner endtime").parse()?;
 
                 HitObjectKind::Spinner { end_time }
             } else if kind & Self::HOLD_FLAG > 0 {
-                $self.n_sliders += 1;
+                $self.inner.n_sliders += 1;
                 let mut end = time;
 
                 if let Some(next) = split.next() {
@@ -454,7 +503,7 @@ macro_rules! parse_hitobjects_body {
                 return Err(ParseError::UnknownHitObjectKind);
             };
 
-            $self.hit_objects.push(HitObject {
+            $self.inner.hit_objects.push(HitObject {
                 pos,
                 start_time: time,
                 kind,
@@ -466,7 +515,7 @@ macro_rules! parse_hitobjects_body {
         }
 
         if unsorted {
-            sort!($self.hit_objects);
+            sort!($self.inner.hit_objects);
         }
 
         Ok(empty)
@@ -524,9 +573,12 @@ macro_rules! parse_body {
         buf.clear();
 
         let mut map = Beatmap {
-            version,
-            hit_objects: Vec::with_capacity(256),
-            ..Default::default()
+            creator: String::new(),
+            inner: Beatmap_ {
+                version,
+                hit_objects: Vec::with_capacity(256),
+                ..Default::default()
+            },
         };
 
         let mut section = Section::None;
@@ -534,6 +586,7 @@ macro_rules! parse_body {
         loop {
             match section {
                 Section::General => section!(map, parse_general, reader, buf, section),
+                Section::Metadata => section!(map, parse_metadata, reader, buf, section),
                 Section::Difficulty => section!(map, parse_difficulty, reader, buf, section),
                 Section::TimingPoints => section!(map, parse_timingpoints, reader, buf, section),
                 Section::HitObjects => section!(map, parse_hitobjects, reader, buf, section),
@@ -575,23 +628,8 @@ macro_rules! parse {
 /// for difficulty and pp calculation
 #[derive(Clone, Default, Debug)]
 pub struct Beatmap {
-    pub mode: GameMode,
-    pub version: u8,
-
-    pub n_circles: u32,
-    pub n_sliders: u32,
-    pub n_spinners: u32,
-
-    pub ar: f32,
-    pub od: f32,
-    pub cs: f32,
-    pub hp: f32,
-    pub sv: f32,
-    pub tick_rate: f32,
-    pub hit_objects: Vec<HitObject>,
-    pub timing_points: Vec<TimingPoint>,
-    pub difficulty_points: Vec<DifficultyPoint>,
-    pub stack_leniency: f32,
+    pub creator: String,
+    pub inner: Beatmap_,
 }
 
 pub(crate) const OSU_FILE_HEADER: &str = "osu file format v";
@@ -609,13 +647,14 @@ impl Beatmap {
 
     #[inline]
     pub fn attributes(&self) -> BeatmapAttributes {
-        BeatmapAttributes::new(self.ar, self.od, self.cs, self.hp)
+        BeatmapAttributes::new(self.inner.ar, self.inner.od, self.inner.cs, self.inner.hp)
     }
 }
 
 impl Beatmap {
     parse!(async BufReader<AsyncRead>);
     parse_general!(async BufReader<AsyncRead>);
+    parse_metadata!(async BufReader<AsyncRead>);
     parse_difficulty!(async BufReader<AsyncRead>);
     parse_timingpoints!(async BufReader<AsyncRead>);
     parse_hitobjects!(async BufReader<AsyncRead>);
@@ -632,6 +671,7 @@ fn split_colon(line: &str) -> Option<(&str, &str)> {
 enum Section {
     None,
     General,
+    Metadata,
     Difficulty,
     TimingPoints,
     HitObjects,
@@ -642,6 +682,7 @@ impl Section {
     fn from_str(s: &str) -> Self {
         match s {
             "General" => Self::General,
+            "Metadata" => Self::Metadata,
             "Difficulty" => Self::Difficulty,
             "TimingPoints" => Self::TimingPoints,
             "HitObjects" => Self::HitObjects,
@@ -729,4 +770,20 @@ impl BeatmapAttributes {
             clock_rate,
         }
     }
+}
+
+#[inline]
+pub(crate) fn is_linear(p0: Pos2, p1: Pos2, p2: Pos2) -> bool {
+    ((p1.x - p0.x) * (p2.y - p0.y) - (p1.y - p0.y) * (p2.x - p0.x)).abs() <= f32::EPSILON
+}
+
+#[inline]
+pub(crate) fn valid_linear(points: &[Pos2]) -> bool {
+    for (curr, next) in points.iter().skip(1).zip(points.iter().skip(2)).step_by(2) {
+        if curr != next {
+            return false;
+        }
+    }
+
+    true
 }
