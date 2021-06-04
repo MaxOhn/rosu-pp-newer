@@ -258,7 +258,7 @@ fn calculate_miss_tps_misscount(
 }
 
 #[inline]
-fn get_miss_probs<'m>(movements: &'m [Movement], tp: f32) -> impl Iterator<Item = f32> + 'm {
+fn get_miss_probs(movements: &'_ [Movement], tp: f32) -> impl Iterator<Item = f32> + '_ {
     movements.iter().map(move |movement| {
         1.0 - HitProbabilities::calculate_cheese_hit_prob(movement, tp, DEFAULT_CHEESE_LEVEL)
     })
@@ -522,7 +522,7 @@ fn calculate_tap_strain(
                 .pointwise_exp(),
         );
 
-        let mut strain = curr_strain.clone();
+        let mut strain = curr_strain;
         strain.pointwise_powf(1.1 / 3.0).scalar_mult(1.5);
 
         strain_history.push(strain);

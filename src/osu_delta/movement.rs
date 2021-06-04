@@ -42,6 +42,7 @@ impl Movement {
             .collect()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn extract_movement_complete(
         movements: &mut Vec<Self>,
         obj_neg2: Option<&OsuObject>,

@@ -229,6 +229,7 @@ pub struct TricubicInterpolation {
 }
 
 impl TricubicInterpolation {
+    #[allow(clippy::too_many_arguments)]
     pub fn new<U, V>(
         x: &'static [f32],
         y: &'static [f32],

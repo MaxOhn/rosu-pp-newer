@@ -1,4 +1,4 @@
-use std::f32::consts::{PI, SQRT_2};
+use std::f32::consts::{FRAC_1_SQRT_2, PI, SQRT_2};
 
 #[inline]
 pub(crate) fn logistic(x: f32) -> f32 {
@@ -48,6 +48,7 @@ fn erfccheb(z: f32) -> f32 {
     t * (-z.powi(2) + 0.5 * (COF[0] + ty * d) - dd).exp()
 }
 
+#[allow(clippy::excessive_precision)]
 pub(crate) fn erfcinv(p: f32) -> f32 {
     if p >= 2.0 {
         return -100.0;
@@ -57,7 +58,8 @@ pub(crate) fn erfcinv(p: f32) -> f32 {
 
     let pp = if p < 1.0 { p } else { 2.0 - p };
     let t = (-2.0 * (pp / 2.0).ln()).sqrt();
-    let mut x = -0.70711 * ((2.30753 + t * 0.27061) / (1.0 + t * (0.99229 + t * 0.04481)) - t);
+    let mut x =
+        -FRAC_1_SQRT_2 * ((2.30753 + t * 0.27061) / (1.0 + t * (0.99229 + t * 0.04481)) - t);
 
     for _ in 0..2 {
         let err = erfc(x) - pp;
@@ -77,6 +79,8 @@ pub(crate) fn erfinv(p: f32) -> f32 {
 }
 
 const NCOEF: usize = 28;
+
+#[allow(clippy::excessive_precision)]
 const COF: [f32; 28] = [
     -1.3026537197817094,
     6.4196979235649026e-1,
@@ -108,6 +112,7 @@ const COF: [f32; 28] = [
     -2.8e-17,
 ];
 
+#[allow(clippy::many_single_char_names)]
 pub(crate) fn try_find_root_brent(
     mut f: impl FnMut(f32) -> f32,
     mut lower: f32,
@@ -222,9 +227,7 @@ pub(crate) fn try_find_root_bisection(
     iters: usize,
 ) -> Option<f32> {
     if upper < lower {
-        let t = upper;
-        upper = lower;
-        lower = t;
+        std::mem::swap(&mut upper, &mut lower);
     }
 
     let mut f_min = f(lower);
@@ -350,7 +353,7 @@ fn reduce_for_root(
     let f_min = f(*lower);
     let f_max = f(*upper);
 
-    if f_min != f_max {
+    if (f_min - f_max).abs() >= f32::EPSILON {
         return true;
     }
 
@@ -368,7 +371,7 @@ fn reduce_for_root(
             continue;
         }
 
-        if sf_max.signum() != sign {
+        if (sf_max.signum() - sign).abs() >= f32::EPSILON {
             *lower = s_min;
             *upper = s_max;
 
@@ -391,7 +394,7 @@ fn almost_equal_relative(a: f32, b: f32) -> bool {
 
 fn almost_equal_norm_relative(a: f32, b: f32, diff: f32, max_err: f32) -> bool {
     if a.is_infinite() || b.is_infinite() {
-        return a == b;
+        return (a - b).abs() < f32::EPSILON;
     }
 
     if a.is_nan() || b.is_nan() {

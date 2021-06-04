@@ -28,8 +28,14 @@ struct MapSectionCache<'m> {
     movements: &'m [Movement],
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone)]
 struct F32(f32);
+
+impl PartialEq for F32 {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 as u32 == other.0 as u32
+    }
+}
 
 impl Eq for F32 {}
 
