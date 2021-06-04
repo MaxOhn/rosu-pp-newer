@@ -47,12 +47,6 @@ impl Movement {
             }
         }
 
-        // println!(
-        //     "init_time={} | count={}",
-        //     init_time,
-        //     movement_with_nested.len()
-        // );
-
         movement_with_nested
     }
 
@@ -137,20 +131,6 @@ impl Movement {
             t_curr_next = (obj_next.time - obj_curr.time) / clock_rate / 1000.0;
         }
 
-        // println!("pos_neg2={}", pos_neg2);
-        // println!("pos_next={}", pos_next);
-        // println!("s_neg2_prev={}", s_neg2_prev);
-        // println!("s_curr_next={}", s_curr_next);
-        // println!("d_neg2_prev={}", d_neg2_prev);
-        // println!("d_neg2_curr={}", d_neg2_curr);
-        // println!("d_curr_next={}", d_curr_next);
-        // println!("t_neg2_prev={}", t_neg2_prev);
-        // println!("t_curr_next={}", t_curr_next);
-        // println!("flowiness_neg2_prev_curr={}", flowiness_neg2_prev_curr);
-        // println!("flowiness_prev_curr_next={}", flowiness_prev_curr_next);
-        // println!("obj_prev_temp_in_mid={}", obj_prev_temp_in_mid);
-        // println!("obj_curr_temp_in_mid={}", obj_curr_temp_in_mid);
-
         // Correction #1
         let mut correction_neg2 = 0.0;
 
@@ -160,14 +140,7 @@ impl Movement {
                 .max(-1.0)
                 .min(1.0);
 
-            // println!(
-            //     "t_ratio_neg2={} | cos_neg2_prev_curr={}",
-            //     t_ratio_neg2, cos_neg2_prev_curr
-            // );
-
             if t_ratio_neg2 > T_RATIO_THRESHOLD {
-                // println!("[a]");
-
                 if d_neg2_prev.abs() < f32::EPSILON {
                     correction_neg2 = CORRECTION_NEG2_STILL;
                 } else {
@@ -179,8 +152,6 @@ impl Movement {
                         * 1.5;
                 }
             } else if t_ratio_neg2 < T_RATIO_THRESHOLD.recip() {
-                // println!("[b]");
-
                 if d_neg2_prev.abs() < f32::EPSILON {
                     correction_neg2 = 0.0;
                 } else {
@@ -189,29 +160,14 @@ impl Movement {
                         * 0.3;
                 }
             } else {
-                // println!("[c]");
-
                 obj_prev_temp_in_mid = true;
                 let normalized_pos_neg2 = s_neg2_prev / -t_neg2_prev * t_prev_curr;
                 let x_neg2 = normalized_pos_neg2.dot(s_prev_curr) / d_prev_curr;
                 let y_neg2 = (normalized_pos_neg2 - s_prev_curr * x_neg2 / d_prev_curr).length();
 
-                // println!(
-                //     "normalized={} | x_neg2={} | y_neg2={}",
-                //     normalized_pos_neg2, x_neg2, y_neg2
-                // );
-
                 let correction_neg2_flow = FLOW_NEG2.evaluate(d_prev_curr, x_neg2, y_neg2);
-
-                // println!("correction_neg2_flow={}", correction_neg2_flow);
-
                 let correction_neg2_snap = SNAP_NEG2.evaluate(d_prev_curr, x_neg2, y_neg2);
                 let correction_neg2_stop = calc_correction_0_stop(x_neg2, y_neg2);
-
-                // println!(
-                //     "flow={} | snap={} | stop={}",
-                //     correction_neg2_flow, correction_neg2_snap, correction_neg2_stop
-                // );
 
                 flowiness_neg2_prev_curr =
                     logistic((correction_neg2_snap - correction_neg2_flow - 0.05) * 20.0);
@@ -275,11 +231,6 @@ impl Movement {
         if obj_prev_temp_in_mid && obj_curr_temp_in_mid {
             let gap = (s_prev_curr - s_curr_next / 2.0 - s_neg2_prev / 2.0).length()
                 / (d_prev_curr + 0.1);
-
-            // println!(
-            //     "flowiness_neg2={} | flowiness_next={}",
-            //     flowiness_neg2_prev_curr, flowiness_prev_curr_next
-            // );
 
             pattern_correction = (logistic((gap - 1.0) * 8.0) - logistic(-6.0))
                 * logistic((d_neg2_prev - 0.7) * 10.0)
@@ -394,19 +345,6 @@ impl Movement {
             * (1.0 + correction_hidden)
             * jump_overlap_correction
             * dist_increase_buff;
-
-        // println!("small_circle_bonus={}", small_circle_bonus);
-        // println!(
-        //     "neg2 + next + pattern: {} + {} + {}",
-        //     correction_neg2, correction_next, pattern_correction
-        // );
-        // println!("high_bpm_jump_buff={}", high_bpm_jump_buff);
-        // println!("tap_correction={}", tap_correction);
-        // println!("small_jump_nerf_factor={}", small_jump_nerf_factor);
-        // println!("big_jump_buff_factor={}", big_jump_buff_factor);
-        // println!("correction_hidden={}", correction_hidden);
-        // println!("jump_overlap_correction={}", jump_overlap_correction);
-        // println!(" ==> {}", d_prev_curr_with_correction);
 
         movement.dist = d_prev_curr_with_correction;
         movement.movement_time = t_prev_curr;

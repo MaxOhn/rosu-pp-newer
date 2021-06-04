@@ -301,17 +301,11 @@ impl TricubicInterpolation {
         let x_idx = self.spline_index(x);
         let (y_idx, z_idx) = self.cubic_interpolations[0].spline_index(y, z);
 
-        // println!("x_idx={} | y_idx={} | z_idx={}", x_idx, y_idx, z_idx);
-
         let x0 = self.x_arr[x_idx];
         let x1 = self.x_arr[x_idx + 1];
 
-        // println!("x0={} | x1={}", x0, x1);
-
         let val0 = self.cubic_interpolations[x_idx].evaluate_idx(y_idx, z_idx, y, z);
         let val1 = self.cubic_interpolations[x_idx + 1].evaluate_idx(y_idx, z_idx, y, z);
-
-        // println!("val0={} | val1={}", val0, val1);
 
         let d0 = if x_idx == 0 {
             self.dx_lower
@@ -324,12 +318,6 @@ impl TricubicInterpolation {
         };
 
         let d1 = if x_idx == self.cubic_interpolations.len() - 2 {
-            // println!(
-            //     "upper={:?} | deriv={}",
-            //     self.dx_upper,
-            //     CubicInterpolation::two_point_derivative(x0, val0, x1, val1)
-            // );
-
             self.dx_upper
                 .unwrap_or_else(|| CubicInterpolation::two_point_derivative(x0, val0, x1, val1))
         } else {
@@ -338,8 +326,6 @@ impl TricubicInterpolation {
 
             CubicInterpolation::three_point_derivative(x0, val0, x1, val1, x2, val2)
         };
-
-        // println!("d0={} | d1={}", d0, d1);
 
         HermiteSpline::new(x0, val0, d0, x1, val1, d1).evaluate(x)
     }
@@ -392,11 +378,7 @@ pub(crate) fn erfcinv(p: f32) -> f32 {
     let t = (-2.0 * (pp / 2.0).ln()).sqrt();
     let mut x = -0.70711 * ((2.30753 + t * 0.27061) / (1.0 + t * (0.99229 + t * 0.04481)) - t);
 
-    // println!("x={} | t={} | pp={} | p={}", x, t, pp, p);
-
     for _ in 0..2 {
-        // println!("erfc of {}", x);
-
         let err = erfc(x) - pp;
         x += err / (1.12837916709551257 * (-x.powi(2)).exp() - x * err);
     }
@@ -458,14 +440,6 @@ pub(crate) fn try_find_root_brent(
     let mut d = 0.0;
     let mut e = 0.0;
 
-    // println!(
-    //     "f_min={} => {} | f_max={} => {}",
-    //     f_min,
-    //     f_min.signum(),
-    //     f_max,
-    //     f_max.signum()
-    // );
-
     if f_min.signum() == f_max.signum() {
         eprintln!("root must be bracketed");
 
@@ -492,8 +466,10 @@ pub(crate) fn try_find_root_brent(
             f_max = f_min;
         }
 
-        // * The 100.0 factor isn't correct
-        let x_acc1 = 100.0 * f32::EPSILON * root.abs() + 0.5 * acc;
+        // ! Required to increase this to make it work
+        // let x_acc1 = f32::EPSILON * root.abs() + 0.5 * acc;
+        let x_acc1 = 10_000.0 * f32::EPSILON * root.abs() + 0.5 * acc;
+
         let x_mid_old = x_mid;
         x_mid = (upper - root) / 2.0;
 
@@ -551,6 +527,8 @@ pub(crate) fn try_find_root_brent(
 
         f_root = f(root);
     }
+
+    eprintln!("no root after max iterations");
 
     None
 }
@@ -630,8 +608,6 @@ pub(crate) fn try_expand_find_root_brent(
         expand_iters,
         expand_iters * 10,
     ));
-
-    // println!("lower={} | upper={}", lower, upper);
 
     try_find_root_brent(f, lower, upper, acc, iters)
 }
@@ -754,8 +730,6 @@ fn almost_equal_norm_relative(a: f32, b: f32, diff: f32, max_err: f32) -> bool {
 
 #[inline]
 fn cdf(mean: f32, std_dev: f32, x: f32) -> f32 {
-    // println!("erfc of {}", (mean - x) / (std_dev * SQRT_2));
-
     0.5 * erfc((mean - x) / (std_dev * SQRT_2))
 }
 
@@ -797,8 +771,6 @@ impl PoissonBinomial {
 
         let k = (count + 0.5 - self.mu) / self.sigma;
         let result = cdf(0.0, 1.0, k) + self.v * (1.0 - k * k) * pdf(0.0, 1.0, k);
-
-        // println!("cdf: {} => {}", count, result.clamp(0.0, 1.0));
 
         result.clamp(0.0, 1.0)
     }

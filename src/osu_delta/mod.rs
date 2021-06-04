@@ -7,9 +7,6 @@ use array_vec::ArrayVec;
 mod control_point_iter;
 use control_point_iter::{ControlPoint, ControlPointIter};
 
-// mod curve;
-// use curve::Curve;
-
 mod math_util;
 
 mod movement;
@@ -74,9 +71,9 @@ const OSU_OD_MAX: f32 = 20.0;
 const OSU_OD_AVG: f32 = 50.0;
 const OSU_OD_MIN: f32 = 80.0;
 
-const OSU_AR_MAX: f32 = 1800.0;
+const OSU_AR_MAX: f32 = 450.0;
 const OSU_AR_AVG: f32 = 1200.0;
-const OSU_AR_MIN: f32 = 450.0;
+const OSU_AR_MIN: f32 = 1800.0;
 
 #[inline]
 fn difficulty_range_od(od: f32) -> f32 {
@@ -96,7 +93,7 @@ mod tests {
 
     #[tokio::test]
     async fn single() {
-        let map_id = 2097898;
+        let map_id = 786018;
 
         let file = File::open(format!(
             "C:/Users/Max/Desktop/Coding/C#/osu-tools/cache/{}.osu",
@@ -106,7 +103,14 @@ mod tests {
         .unwrap();
         let map = Beatmap::parse(file).await.unwrap();
 
-        let result = OsuPP::new(&map).calculate();
+        let result = OsuPP::new(&map)
+            // .n300(1184)
+            // .n100(32)
+            // .n50(0)
+            // .misses(0)
+            // .combo(1588)
+            .mods(0)
+            .calculate();
 
         println!("Stars={} | PP={}", result.stars(), result.pp());
     }

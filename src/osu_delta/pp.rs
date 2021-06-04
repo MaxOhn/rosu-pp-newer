@@ -288,7 +288,7 @@ impl<'m> OsuPP<'m> {
             {
                 full_combo_threshold as f32 / combo as f32
             } else {
-                ((attributes.max_combo - self.combo.unwrap_or(0)) as f32
+                ((attributes.max_combo - self.combo.unwrap_or(attributes.max_combo)) as f32
                     / (0.1 * attributes.n_sliders as f32))
                     .powi(3)
             }
@@ -369,11 +369,6 @@ impl<'m> OsuPP<'m> {
 
         let acc_on_cheese_notes_positive = (acc_on_cheese_notes - 1.0).exp();
 
-        // println!(
-        //     "acc_on_cheese_notes_positive={}",
-        //     acc_on_cheese_notes_positive
-        // );
-
         let ur_on_cheese_notes =
             10.0 * great_window / (SQRT_2 * erfinv(acc_on_cheese_notes_positive));
         let cheese_level = logistic(((ur_on_cheese_notes * attributes.aim_diff) - 3200.0) / 2000.0);
@@ -403,7 +398,7 @@ impl<'m> OsuPP<'m> {
         let mut ar_factor = 1.0;
 
         if attributes.ar > 10.0 {
-            ar_factor += (0.05 + 0.35 * ((PI * total_hits.min(1250.0)).sin() / 2500.0).powf(1.7))
+            ar_factor += (0.05 + 0.35 * ((PI * total_hits.min(1250.0) / 2500.0).sin()).powf(1.7))
                 * (attributes.ar - 10.0).powi(2);
         } else if attributes.ar < 8.0 {
             ar_factor += 0.01 * (8.0 - attributes.ar);
@@ -441,20 +436,11 @@ impl<'m> OsuPP<'m> {
 
         let modified_acc = self.modified_acc(attributes);
 
-        // println!(
-        //     "modified_acc={} | total_hits={} | stream_note_count={}",
-        //     modified_acc, total_hits, attributes.stream_note_count
-        // );
-
         let acc_on_stream =
             1.0 - (1.0 - modified_acc) * (total_hits / attributes.stream_note_count).sqrt();
 
         let acc_on_streams_positive = (acc_on_stream - 1.0).exp();
-
-        // println!("acc_on_streams_positive={}", acc_on_streams_positive);
-
         let ur_on_streams = 10.0 * great_window / (SQRT_2 * erfinv(acc_on_streams_positive));
-
         let mash_level = logistic(((ur_on_streams * attributes.tap_diff) - 4000.0) / 1000.0);
 
         let tap_skill =
@@ -515,7 +501,7 @@ impl<'m> OsuPP<'m> {
         let deviation_on_circles =
             (great_window + 20.0) / (SQRT_2 * erfinv(acc_on_circles_positive));
 
-        let mut acc_value = deviation_on_circles.powf(-2.2) * finger_control_diff.sqrt();
+        let mut acc_value = deviation_on_circles.powf(-2.2) * finger_control_diff.sqrt() * 46_000.0;
 
         // scale acc pp with misses
         acc_value *= 0.96_f32.powf((effective_miss_count - MISS_COUNT_LENIENCY).max(0.0));

@@ -68,21 +68,11 @@ pub fn stars(
         / 1000.0
         / map_attributes.clock_rate;
 
-    let preempt_no_clock_rate = difficulty_range_ar(map.ar);
-
+    let preempt_no_clock_rate = difficulty_range_ar(map_attributes.ar);
     let note_densities = note_density(&hit_objects, preempt_no_clock_rate);
     let tap_attributes = calculate_tap_attributes(&hit_objects, map_attributes.clock_rate, radius);
-
-    // println!(
-    //     "difficulty={} | stream_note_count={} | mashed_difficulty={}",
-    //     tap_attributes.difficulty,
-    //     tap_attributes.stream_note_count,
-    //     tap_attributes.mashed_difficulty
-    // );
-
     let finger_control_diff =
         calculate_finger_control_diff(&hit_objects, map_attributes.clock_rate);
-
     let aim_attributes = calculate_aim_attributes(
         &hit_objects,
         map_attributes.clock_rate,
@@ -94,11 +84,6 @@ pub fn stars(
     let tap_sr = TAP_MULTIPLIER * tap_attributes.difficulty.powf(SR_EXPONENT);
     let aim_sr = AIM_MULTIPLIER * aim_attributes.fc_prob_throughput.powf(SR_EXPONENT);
     let finger_control_sr = FINGER_CONTROL_MULTIPLIER * finger_control_diff.powf(SR_EXPONENT);
-
-    println!(
-        "aim_sr={} | tap_sr={} | finger_control_sr={}",
-        aim_sr, tap_sr, finger_control_sr
-    );
 
     let sr = [tap_sr, aim_sr, finger_control_sr].powi_mean(7) * 1.131;
 
@@ -276,9 +261,6 @@ fn get_miss_count(p: f32, miss_probs: &[f32]) -> f32 {
     if miss_probs.iter().sum::<f32>().abs() < f32::EPSILON {
         return 0.0;
     }
-
-    // println!("p={}", p);
-    // println!("miss_probs={:?}", miss_probs);
 
     let distribution = PoissonBinomial::new(miss_probs);
     let cdf_minus_prob = |miss_count| distribution.cdf(miss_count) - p;
@@ -515,7 +497,6 @@ fn create_movements(
     let mut movements = Movement::extract_movement(&hit_objects[0]);
 
     for i in 1..hit_objects.len() {
-        // for i in 2..3_usize {
         let obj_neg4 = i.checked_sub(4).and_then(|i| hit_objects.get(i));
         let obj_neg2 = i.checked_sub(2).and_then(|i| hit_objects.get(i));
         let obj_prev = &hit_objects[i - 1];
@@ -538,14 +519,8 @@ fn create_movements(
             radius,
         );
 
-        // println!("[{}] new count: {}", i, new_movements.len());
-
         movements.extend(new_movements);
     }
-
-    // for (i, movement) in movements.iter().enumerate() {
-    //     println!("[{}] {}", i, movement.dist);
-    // }
 
     movements
 }
@@ -614,11 +589,7 @@ fn calculate_tap_attributes(
         .expect("no burst strain");
 
     let streamness_mask = calculate_streamness_mask(hit_objects, burst_strain, clock_rate);
-
     let stream_note_count = streamness_mask.iter().sum();
-
-    // println!("stream_note_count={}", stream_note_count);
-
     let (_, mash_tap_diff) = calculate_tap_strain(hit_objects, 1.0, clock_rate, radius);
 
     TapAttributes {
@@ -644,20 +615,13 @@ fn calculate_streamness_mask(hit_objects: &[OsuObject], skill: f32, clock_rate: 
 
     for i in 1..hit_objects.len() {
         let t = (hit_objects[i].time - hit_objects[i - 1].time) / 1000.0 / clock_rate;
-
-        // println!(
-        //     ">{} => {}",
-        //     (t / stream_time_threshold - 1.0) * 15.0,
-        //     logistic((t / stream_time_threshold - 1.0) * 15.0)
-        // );
-
         streamness_mask[i] = 1.0 - logistic((t / stream_time_threshold - 1.0) * 15.0);
     }
 
     streamness_mask
 }
 
-// Four elements, evenly spaces between 2.3 and -2.8,
+// Four elements, evenly spaced between 2.3 and -2.8,
 // then pointwise applied the exp function on
 const DECAY_COEFFS: [f32; 4] = [9.97418, 1.82212, 0.332871, 0.0608101];
 
