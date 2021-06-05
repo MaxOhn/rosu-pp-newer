@@ -24,6 +24,8 @@ use osu_object::OsuObject;
 mod pp;
 pub use pp::{OsuAttributeProvider, OsuPP};
 
+mod roots;
+
 mod slider_state;
 use slider_state::SliderState;
 
@@ -98,7 +100,7 @@ mod tests {
     use tokio::fs::File;
 
     #[tokio::test]
-    async fn single() {
+    async fn single_delta() {
         let map_id = 786018;
 
         let file = File::open(format!(

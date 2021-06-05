@@ -65,8 +65,7 @@ mod tests {
     use tokio::fs::File;
 
     #[tokio::test]
-    #[ignore]
-    async fn single() {
+    async fn single_xexxar() {
         let map_id = 2097898;
 
         let file = File::open(format!(

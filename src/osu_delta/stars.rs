@@ -1,9 +1,8 @@
-use crate::osu_delta::math_util::try_expand_find_root_brent;
-
-use super::math_util::{logistic, try_find_root_bisection, try_find_root_brent, PoissonBinomial};
 use super::{
-    difficulty_range_ar, difficulty_range_od, ArrayVec, DifficultyAttributes, HitProbabilities,
-    Movement, OsuObject, SliderState,
+    difficulty_range_ar, difficulty_range_od,
+    math_util::{logistic, PoissonBinomial},
+    roots::{expand_find_root_brent, find_root_bisection, find_root_brent},
+    ArrayVec, DifficultyAttributes, HitProbabilities, Movement, OsuObject, SliderState,
 };
 
 use rosu_pp::{Beatmap, Mods};
@@ -272,8 +271,7 @@ fn get_miss_count(p: f32, miss_probs: impl Iterator<Item = f32>) -> f32 {
 
     let cdf_minus_prob = |miss_count| distribution.cdf(miss_count) - p;
 
-    try_expand_find_root_brent(cdf_minus_prob, -100.0, 1000.0, 1e-8, 100, 1.6, 100)
-        .expect("no root")
+    expand_find_root_brent(cdf_minus_prob, -100.0, 1000.0, 1e-8, 100, 1.6, 100)
 }
 
 #[inline]
@@ -299,14 +297,13 @@ fn calculate_fc_time_tp(hit_probs: &mut HitProbabilities, section_count: usize) 
     let fc_time_minus_threshold =
         |tp| hit_probs.min_expected_time_for_section_count(tp, section_count) - TIME_THRESHOLD_BASE;
 
-    try_find_root_bisection(
+    find_root_bisection(
         fc_time_minus_threshold,
         TP_MIN,
         TP_MAX,
         TIME_PRECISION,
         MAX_ITERATIONS,
     )
-    .expect("no root")
 }
 
 fn calculate_fc_prob(movements: &[Movement], tp: f32, cheese_level: f32) -> f32 {
@@ -335,14 +332,13 @@ fn calculate_fc_prob_tp(movements: &[Movement], cheese_level: f32) -> f32 {
     let fc_prob_minus_threshold =
         |tp| calculate_fc_prob(movements, tp, cheese_level) - PROB_TRESHOLD;
 
-    try_find_root_brent(
+    find_root_brent(
         fc_prob_minus_threshold,
         TP_MIN,
         TP_MAX,
         PROB_PRECISION,
         MAX_ITERATIONS,
     )
-    .expect("no root")
 }
 
 fn create_movements(
