@@ -8,7 +8,7 @@ pub(crate) fn find_root_brent(
 ) -> f32 {
     match try_find_root_brent(f, lower, upper, acc, iters) {
         Some(root) => root,
-        None => (upper - lower) / 2.0,
+        None => (upper + lower) / 2.0,
     }
 }
 
@@ -27,7 +27,7 @@ fn try_find_root_brent(
     let mut e = 0.0;
 
     if f_min.signum() == f_max.signum() {
-        eprintln!("root must be bracketed");
+        // eprintln!("root must be bracketed");
 
         return None;
     }
@@ -64,7 +64,7 @@ fn try_find_root_brent(
         }
 
         if (x_mid - x_mid_old).abs() < f32::EPSILON {
-            eprintln!("accuracy not sufficient, but cannot be improved further");
+            // eprintln!("accuracy not sufficient, but cannot be improved further");
 
             return Some(root);
         }
@@ -114,7 +114,7 @@ fn try_find_root_brent(
         f_root = f(root);
     }
 
-    eprintln!("no root after max iterations");
+    // eprintln!("no root after max iterations");
 
     None
 }
@@ -129,7 +129,7 @@ pub(crate) fn find_root_bisection(
 ) -> f32 {
     match try_find_root_bisection(f, lower, upper, acc, iters) {
         Some(root) => root,
-        None => (upper - lower) / 2.0,
+        None => (upper + lower) / 2.0,
     }
 }
 
@@ -159,7 +159,7 @@ fn try_find_root_bisection(
     let mut root = 0.5 * (lower + upper);
 
     if f_min.signum() == f_max.signum() {
-        eprintln!("bad bracketing?");
+        // eprintln!("bad bracketing?");
 
         return None;
     }
@@ -172,7 +172,7 @@ fn try_find_root_bisection(
         }
 
         if (lower - root).abs() < f32::EPSILON || (upper - root).abs() < f32::EPSILON {
-            eprintln!("accuracy not sufficient, but cannot be improved further");
+            // eprintln!("accuracy not sufficient, but cannot be improved further");
 
             return Some(root);
         }
@@ -190,7 +190,7 @@ fn try_find_root_bisection(
         root = 0.5 * (lower + upper);
     }
 
-    eprintln!("no root after max iterations");
+    // eprintln!("no root after max iterations");
 
     None
 }
@@ -207,7 +207,7 @@ pub(crate) fn expand_find_root_brent(
 ) -> f32 {
     match try_expand_find_root_brent(f, lower, upper, acc, iters, factor, expand_iters) {
         Some(root) => root,
-        None => (upper - lower) / 2.0,
+        None => (upper + lower) / 2.0,
     }
 }
 
