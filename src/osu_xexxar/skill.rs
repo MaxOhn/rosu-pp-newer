@@ -1,139 +1,132 @@
-use super::{DifficultyObject, SkillKind};
+use super::{
+    skill_kind::{
+        AIM_COMBINED_STARS_PER_DOUBLE, AIM_FLOW_STARS_PER_DOUBLE, AIM_SNAP_STARS_PER_DOUBLE,
+        TAP_STARS_PER_DOUBLE,
+    },
+    DifficultyObject, SkillKind,
+};
 
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 
-const TARGET_FC_PRECISION: f32 = 0.1;
+const STAR_RATING_CONSTANT: f32 = 0.6261;
 
 #[derive(Debug)]
 pub(crate) struct Skill<'h> {
     kind: SkillKind,
-    pub(crate) strain_peaks: Vec<f32>,
-    pub(crate) times: Vec<f32>,
     previous: VecDeque<DifficultyObject<'h>>,
-    curr_strain: f32,
 }
 
 impl<'h> Skill<'h> {
     #[inline]
     pub(crate) fn new(kind: SkillKind) -> Self {
         Self {
-            kind,
-            strain_peaks: Vec::with_capacity(128),
-            times: Vec::with_capacity(128),
             previous: VecDeque::with_capacity(kind.history_len()),
-            curr_strain: 1.0,
+            kind,
         }
     }
 
     #[inline]
-    pub(crate) fn process_internal(&mut self, current: DifficultyObject<'h>, clock_rate: f32) {
+    pub(crate) fn process_internal(&mut self, current: DifficultyObject<'h>) {
         if self.previous.len() > self.kind.history_len() {
             self.previous.pop_back();
         }
 
-        self.process(&current, clock_rate);
+        self.process(&current);
         self.previous.push_front(current);
     }
 
     #[inline]
-    fn process(&mut self, current: &DifficultyObject, clock_rate: f32) {
-        let strain_at = self
-            .kind
-            .strain_value_at(&mut self.curr_strain, current, &self.previous);
-
-        self.strain_peaks.push(strain_at);
-        self.times.push(current.base.time / clock_rate);
+    fn process(&mut self, current: &DifficultyObject) {
+        self.kind.process(current, &self.previous)
     }
 
-    #[inline]
-    pub(crate) fn difficulty_value(&mut self) -> f32 {
-        let total_difficulty = self.calculate_difficulty_value();
-
-        self.fc_time_skill_level(total_difficulty)
-    }
-
-    fn expected_target_time(&self, total_difficulty: f32) -> f32 {
-        let mut target_time = 0.0;
-
-        for i in 1..self.strain_peaks.len() {
-            target_time += (self.times[i] - self.times[i - 1]).min(2000.0)
-                * (self.strain_peaks[i] / total_difficulty);
-        }
-
-        target_time
-    }
-
-    fn expected_fc_time(&self, skill: f32) -> f32 {
-        let mut last_timestamp = self.times[0] - 5.0;
-        let mut fc_time = 0.0;
-
-        for i in 0..self.strain_peaks.len() {
-            let dt = self.times[i] - last_timestamp;
-            last_timestamp = self.times[i];
-            let fc_prob = self.fc_probability(skill, self.strain_peaks[i]);
-            fc_time = (fc_time + dt) / fc_prob;
-        }
-
-        fc_time - (self.times.last().expect("no last") - self.times[0])
-    }
-
-    fn fc_time_skill_level(&mut self, total_difficulty: f32) -> f32 {
-        let mut length_estimate = 0.4 * (self.times.last().expect("no last") - self.times[0]);
-        let target_fc_time = (30 * 60 * 1000) as f32
-            + 30.0 * (self.expected_target_time(total_difficulty) - 60_000.0).max(0.0);
-
-        let mut fc_prob = length_estimate / target_fc_time;
-        let mut skill = self.skill_level(fc_prob, total_difficulty);
-
-        for _ in 0..5 {
-            let fc_time = self.expected_fc_time(skill);
-            length_estimate = fc_time * fc_prob;
-            fc_prob = length_estimate / target_fc_time;
-            skill = self.skill_level(fc_prob, total_difficulty);
-
-            if (fc_time - target_fc_time).abs() < TARGET_FC_PRECISION * target_fc_time {
-                break;
-            }
-        }
-
-        skill
-    }
-
-    fn calculate_difficulty_value(&self) -> f32 {
-        let difficulty_exponent = self.kind.difficulty_exponent();
+    pub(crate) fn calculate_difficulty_value(&self, strains: &[f32], stars_per_double: f32) -> f32 {
+        let difficulty_exponent = stars_per_double.log2().recip();
         let mut difficulty = 0.0;
 
-        for &strain in self.strain_peaks.iter() {
+        for &strain in strains {
             difficulty += strain.powf(difficulty_exponent);
         }
 
         difficulty.powf(difficulty_exponent.recip())
     }
 
-    pub(crate) fn calculate_display_value(&mut self) -> f32 {
-        let mut difficulty = 0.0;
-        let mut weight = 1.0;
-        let decay_weight = 0.9;
+    pub(crate) fn combine_star_rating(
+        &self,
+        first: f32,
+        second: f32,
+        stars_per_double: f32,
+    ) -> f32 {
+        let difficulty_exponent = stars_per_double.log2().recip();
 
-        self.strain_peaks
-            .sort_unstable_by(|a, b| b.partial_cmp(&a).unwrap_or(Ordering::Equal));
+        (first.powf(difficulty_exponent) + second.powf(difficulty_exponent))
+            .powf(difficulty_exponent.recip())
+    }
 
-        for strain in self.strain_peaks.iter() {
-            difficulty += strain * weight;
-            weight *= decay_weight;
+    pub(crate) fn display_difficulty_value(&mut self) -> f32 {
+        match &mut self.kind {
+            SkillKind::Aim {
+                snap_strains,
+                flow_strains,
+                ..
+            } => {
+                let flow_star_rating =
+                    calculate_display_difficulty_value(flow_strains, AIM_FLOW_STARS_PER_DOUBLE);
+                let snap_star_rating =
+                    calculate_display_difficulty_value(snap_strains, AIM_SNAP_STARS_PER_DOUBLE);
+
+                self.combine_star_rating(
+                    flow_star_rating,
+                    snap_star_rating,
+                    AIM_COMBINED_STARS_PER_DOUBLE,
+                )
+            }
+            SkillKind::Tap { strains, .. } => {
+                calculate_display_difficulty_value(strains, TAP_STARS_PER_DOUBLE)
+            }
         }
-
-        difficulty
     }
 
-    #[inline]
-    fn fc_probability(&self, skill: f32, difficulty: f32) -> f32 {
-        (-(difficulty / skill.max(1e-10)).powf(self.kind.difficulty_exponent())).exp()
+    pub(crate) fn difficulty_value(&self) -> f32 {
+        match &self.kind {
+            SkillKind::Aim {
+                snap_strains,
+                flow_strains,
+                ..
+            } => {
+                let flow_star_rating =
+                    self.calculate_difficulty_value(flow_strains, AIM_FLOW_STARS_PER_DOUBLE);
+                let snap_star_rating =
+                    self.calculate_difficulty_value(snap_strains, AIM_SNAP_STARS_PER_DOUBLE);
+
+                self.combine_star_rating(
+                    flow_star_rating,
+                    snap_star_rating,
+                    AIM_COMBINED_STARS_PER_DOUBLE,
+                )
+            }
+            SkillKind::Tap { strains, .. } => {
+                self.calculate_difficulty_value(strains, TAP_STARS_PER_DOUBLE)
+            }
+        }
+    }
+}
+
+pub(crate) fn calculate_display_difficulty_value(
+    strains: &mut [f32],
+    stars_per_double: f32,
+) -> f32 {
+    let mut difficulty = 0.0;
+    let mut weight = 1.0;
+    let decay_weight = 0.95;
+
+    strains.sort_unstable_by(|a, b| b.partial_cmp(&a).unwrap_or(Ordering::Equal));
+
+    for &strain in strains.iter() {
+        difficulty += strain * weight;
+        weight *= decay_weight;
     }
 
-    #[inline]
-    fn skill_level(&self, probability: f32, difficulty: f32) -> f32 {
-        difficulty * (-probability.ln()).powf(-self.kind.difficulty_exponent().recip())
-    }
+    difficulty * STAR_RATING_CONSTANT
 }

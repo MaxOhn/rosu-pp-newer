@@ -12,7 +12,7 @@ use rosu_pp::{osu::DifficultyAttributes, parse::Pos2, Mods, StarResult};
 const OBJECT_RADIUS: f32 = 64.0;
 const DIFFICULTY_MULTIPLIER: f32 = 0.18;
 const NORMALIZED_RADIUS: f32 = 50.0;
-const DISPLAY_DIFFICULTY_MULTIPLIER: f32 = 0.605;
+const DISPLAY_DIFFICULTY_MULTIPLIER: f32 = 0.04;
 const STACK_DISTANCE: f32 = 3.0;
 
 /// Star calculation for osu!standard maps.
@@ -45,8 +45,8 @@ pub fn stars(map: &Beatmap, mods: impl Mods, passed_objects: Option<usize>) -> S
     let radius = OBJECT_RADIUS * (1.0 - 0.7 * (map_attributes.cs - 5.0) / 5.0) / 2.0;
     let mut scaling_factor = NORMALIZED_RADIUS / radius;
 
-    if radius < 32.0 {
-        let small_circle_bonus = (32.0 - radius).min(5.0) / 50.0;
+    if radius < 30.0 {
+        let small_circle_bonus = (30.0 - radius).min(5.0) / 50.0;
         scaling_factor *= 1.0 + small_circle_bonus;
     }
 
@@ -103,8 +103,8 @@ pub fn stars(map: &Beatmap, mods: impl Mods, passed_objects: Option<usize>) -> S
         };
     });
 
-    let mut aim = Skill::new(SkillKind::Aim);
-    let mut tap = Skill::new(SkillKind::Tap);
+    let mut aim = Skill::new(SkillKind::new_aim());
+    let mut tap = Skill::new(SkillKind::new_tap());
 
     // First object has no predecessor and thus no strain, handle distinctly
     let mut prev_prev = None;
@@ -126,8 +126,8 @@ pub fn stars(map: &Beatmap, mods: impl Mods, passed_objects: Option<usize>) -> S
     prev_vals.replace((h.jump_dist, h.strain_time));
     prev = curr;
 
-    aim.process_internal(h.clone(), map_attributes.clock_rate);
-    tap.process_internal(h, map_attributes.clock_rate);
+    aim.process_internal(h.clone());
+    tap.process_internal(h);
 
     // Handle all other objects
     for curr in hit_objects.iter().skip(2) {
@@ -144,24 +144,19 @@ pub fn stars(map: &Beatmap, mods: impl Mods, passed_objects: Option<usize>) -> S
         prev_vals.replace((h.jump_dist, h.strain_time));
         prev = curr;
 
-        aim.process_internal(h.clone(), map_attributes.clock_rate);
-        tap.process_internal(h, map_attributes.clock_rate);
+        aim.process_internal(h.clone());
+        tap.process_internal(h);
     }
 
     let aim_rating = aim.difficulty_value().powf(0.75) * DIFFICULTY_MULTIPLIER;
     let speed_rating = tap.difficulty_value().powf(0.75) * DIFFICULTY_MULTIPLIER;
 
     let display_aim_rating =
-        aim.calculate_display_value().powf(0.75) * DISPLAY_DIFFICULTY_MULTIPLIER;
+        aim.display_difficulty_value().powf(0.75) * DISPLAY_DIFFICULTY_MULTIPLIER;
     let display_speed_rating =
-        tap.calculate_display_value().powf(0.75) * DISPLAY_DIFFICULTY_MULTIPLIER;
+        tap.display_difficulty_value().powf(0.75) * DISPLAY_DIFFICULTY_MULTIPLIER;
 
-    let display_aim_perf = (display_aim_rating.max(1.0) * 5.0 - 4.0).powi(3) / 100_000.0;
-    let display_speed_perf = (display_speed_rating.max(1.0) * 5.0 - 4.0).powi(3) / 100_000.0;
-
-    let total_pp = (display_aim_perf.powf(1.1) + display_speed_perf.powf(1.1)).powf(1.0 / 1.1);
-
-    let stars = 0.027 * ((100_000.0 / (1.0_f32 / 1.1).exp2() * total_pp).cbrt() + 4.0);
+    let stars = display_aim_rating + display_speed_rating;
 
     diff_attributes.n_circles = map.n_circles as usize;
     diff_attributes.n_spinners = map.n_spinners as usize;
