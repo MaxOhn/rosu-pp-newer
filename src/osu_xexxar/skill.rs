@@ -9,7 +9,7 @@ use super::{
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 
-const STAR_RATING_CONSTANT: f32 = 0.6261;
+const STAR_RATING_CONSTANT: f32 = 0.08265;
 
 #[derive(Debug)]
 pub(crate) struct Skill<'h> {

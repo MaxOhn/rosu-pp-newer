@@ -12,7 +12,6 @@ use rosu_pp::{osu::DifficultyAttributes, parse::Pos2, Mods, StarResult};
 const OBJECT_RADIUS: f32 = 64.0;
 const DIFFICULTY_MULTIPLIER: f32 = 0.18;
 const NORMALIZED_RADIUS: f32 = 50.0;
-const DISPLAY_DIFFICULTY_MULTIPLIER: f32 = 0.04;
 const STACK_DISTANCE: f32 = 3.0;
 
 /// Star calculation for osu!standard maps.
@@ -151,10 +150,15 @@ pub fn stars(map: &Beatmap, mods: impl Mods, passed_objects: Option<usize>) -> S
     let aim_rating = aim.difficulty_value().powf(0.75) * DIFFICULTY_MULTIPLIER;
     let speed_rating = tap.difficulty_value().powf(0.75) * DIFFICULTY_MULTIPLIER;
 
-    let display_aim_rating =
-        aim.display_difficulty_value().powf(0.75) * DISPLAY_DIFFICULTY_MULTIPLIER;
-    let display_speed_rating =
-        tap.display_difficulty_value().powf(0.75) * DISPLAY_DIFFICULTY_MULTIPLIER;
+    println!("aim_rating={} | speed_rating={}", aim_rating, speed_rating);
+
+    let display_aim_rating = aim.display_difficulty_value().powf(0.75) * DIFFICULTY_MULTIPLIER;
+    let display_speed_rating = tap.display_difficulty_value().powf(0.75) * DIFFICULTY_MULTIPLIER;
+
+    println!(
+        "display_aim_rating={} | display_speed_rating={}",
+        display_aim_rating, display_speed_rating
+    );
 
     let stars = display_aim_rating + display_speed_rating;
 

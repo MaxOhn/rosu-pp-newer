@@ -297,14 +297,14 @@ impl<'m> OsuPP<'m> {
 
         // AR bonus
         let ar_factor = if attributes.ar > 10.33 {
-            0.15 * (attributes.ar - 10.33)
+            0.3 * (attributes.ar - 10.33)
         } else if attributes.ar < 8.0 {
             0.05 * (8.0 - attributes.ar)
         } else {
             0.0
         };
 
-        aim_value *= 1.0 + ar_factor * (0.33 + 0.67 * (total_hits / 1000.0).min(1.0));
+        aim_value *= 1.0 + ar_factor * (0.25 + 0.75 * (total_hits / 1000.0).min(1.0));
 
         // HD bonus
         if self.mods.hd() {
@@ -365,7 +365,7 @@ impl<'m> OsuPP<'m> {
             * self
                 .acc
                 .unwrap()
-                .powf((14.5 - (attributes.od).max(8.0)) / 2.0);
+                .powf((14.5 - attributes.od.max(8.0)) / 2.0);
 
         // Penalize n50s
         speed_value *= 0.98_f32.powf(
