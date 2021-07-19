@@ -132,16 +132,40 @@ impl SkillKind {
 
                 let rhythm_complexity = calculate_rhythm_difficulty(previous, avg_strain_time);
 
+                // println!("rhythm_complexity={}", rhythm_complexity);
+
                 strain_time = strain_time - 25.0;
 
                 strain_value += TAP_STRAIN_TIME_BUFF_RANGE / strain_time;
 
+                // println!(
+                //     "strain_time={} | strain_value={} | snap_prob={}",
+                //     strain_time,
+                //     strain_value,
+                //     curr.snap_probability(),
+                // );
+
+                // print!("{} -> ", curr_strain);
+
                 *curr_strain *=
-                    computed_decay.powf((current.strain_time / *avg_strain_time).sqrt());
+                    computed_decay.powf((current.strain_time / *avg_strain_time).max(1.0));
+
+                // print!("{} -> ", curr_strain);
+
                 *curr_strain +=
                     (1.0 + 0.5 * curr.snap_probability()) * strain_value * TAP_STRAIN_MULTIPLIER;
 
+                // println!("{}", curr_strain);
+
+                // println!(
+                //     "avg_strain_time={} | curr_strain={}",
+                //     avg_strain_time, curr_strain
+                // );
+
                 let strain = *curr_strain * rhythm_complexity;
+
+                // println!("{} * {} = {}", curr_strain, rhythm_complexity, strain);
+
                 strains.push(strain);
             }
         }
@@ -174,15 +198,20 @@ impl SkillKind {
     #[inline]
     fn compute_decay(&self, ms: f32) -> f32 {
         let begin_decay_threshold = self.begin_decay_threshold();
+        let base_decay = self.base_decay();
 
-        if ms < begin_decay_threshold {
-            self.base_decay()
+        let res = if ms < begin_decay_threshold {
+            base_decay
         } else {
-            (self
-                .base_decay()
-                .powf(1000.0 / ms.min(begin_decay_threshold)))
-            .powf(ms / 1000.0)
-        }
+            (base_decay.powf(1000.0 / ms.min(begin_decay_threshold))).powf(ms / 1000.0)
+        };
+
+        // println!(
+        //     "ms={} | bdt={} | base_decay={} => {}",
+        //     ms, begin_decay_threshold, base_decay, res
+        // );
+
+        res
     }
 }
 

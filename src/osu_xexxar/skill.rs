@@ -45,8 +45,17 @@ impl<'h> Skill<'h> {
         let difficulty_exponent = stars_per_double.log2().recip();
         let mut difficulty = 0.0;
 
-        for &strain in strains {
+        // println!("diff_exp={}", difficulty_exponent);
+
+        for (_i, &strain) in strains.iter().enumerate() {
             difficulty += strain.powf(difficulty_exponent);
+            // println!("{}: {}", _i, strain);
+            // println!(
+            //     "{}: {} => {}",
+            //     _i,
+            //     strain.powf(difficulty_exponent),
+            //     difficulty
+            // );
         }
 
         difficulty.powf(difficulty_exponent.recip())

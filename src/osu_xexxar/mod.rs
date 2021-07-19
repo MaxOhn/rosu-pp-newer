@@ -66,11 +66,14 @@ mod tests {
 
     #[tokio::test]
     async fn single_xexxar() {
-        let map_id = 970331;
+        let map_id = 2109842;
 
-        let file = File::open(format!("/home/max/Coding/osu-tools/cache/{}.osu", map_id))
-            .await
-            .unwrap();
+        let file = File::open(format!(
+            "C:/Users/Max/Desktop/Coding/C#/osu-tools/cache/{}.osu",
+            map_id
+        ))
+        .await
+        .unwrap();
         let map = Beatmap::parse(file).await.unwrap();
 
         let result = OsuPP::new(&map).calculate();

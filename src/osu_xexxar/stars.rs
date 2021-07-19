@@ -148,11 +148,13 @@ pub fn stars(map: &Beatmap, mods: impl Mods, passed_objects: Option<usize>) -> S
     }
 
     let aim_rating = aim.difficulty_value().powf(0.75) * DIFFICULTY_MULTIPLIER;
+    // let aim_rating = 0.0;
     let speed_rating = tap.difficulty_value().powf(0.75) * DIFFICULTY_MULTIPLIER;
 
     println!("aim_rating={} | speed_rating={}", aim_rating, speed_rating);
 
     let display_aim_rating = aim.display_difficulty_value().powf(0.75) * DIFFICULTY_MULTIPLIER;
+    // let display_aim_rating = 0.0;
     let display_speed_rating = tap.display_difficulty_value().powf(0.75) * DIFFICULTY_MULTIPLIER;
 
     println!(
