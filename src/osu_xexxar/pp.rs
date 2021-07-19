@@ -304,7 +304,7 @@ impl<'m> OsuPP<'m> {
             0.0
         };
 
-        aim_value *= 1.0 + ar_factor * (0.25 + 0.75 * (total_hits / 1000.0).min(1.0));
+        aim_value *= 1.0 + ar_factor * (0.25 + 0.75 * (total_hits as u32 / 1000).min(1) as f32);
 
         // HD bonus
         if self.mods.hd() {

@@ -66,7 +66,7 @@ mod tests {
 
     #[tokio::test]
     async fn single_xexxar() {
-        let map_id = 2109842;
+        let map_id = 1092090;
 
         let file = File::open(format!(
             "C:/Users/Max/Desktop/Coding/C#/osu-tools/cache/{}.osu",
@@ -76,7 +76,7 @@ mod tests {
         .unwrap();
         let map = Beatmap::parse(file).await.unwrap();
 
-        let result = OsuPP::new(&map).calculate();
+        let result = OsuPP::new(&map).mods(64).n100(8).combo(700).calculate();
 
         println!("Stars: {} | PP: {}", result.stars(), result.pp());
     }

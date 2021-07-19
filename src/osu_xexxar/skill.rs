@@ -41,17 +41,6 @@ impl<'h> Skill<'h> {
         self.kind.process(current, &self.previous)
     }
 
-    pub(crate) fn calculate_difficulty_value(&self, strains: &[f32], stars_per_double: f32) -> f32 {
-        let difficulty_exponent = stars_per_double.log2().recip();
-        let mut difficulty = 0.0;
-
-        for &strain in strains {
-            difficulty += strain.powf(difficulty_exponent);
-        }
-
-        difficulty.powf(difficulty_exponent.recip())
-    }
-
     pub(crate) fn combine_star_rating(
         &self,
         first: f32,
@@ -92,9 +81,9 @@ impl<'h> Skill<'h> {
                 ..
             } => {
                 let flow_star_rating =
-                    self.calculate_difficulty_value(flow_strains, AIM_FLOW_STARS_PER_DOUBLE);
+                    calculate_difficulty_value(flow_strains, AIM_FLOW_STARS_PER_DOUBLE);
                 let snap_star_rating =
-                    self.calculate_difficulty_value(snap_strains, AIM_SNAP_STARS_PER_DOUBLE);
+                    calculate_difficulty_value(snap_strains, AIM_SNAP_STARS_PER_DOUBLE);
 
                 self.combine_star_rating(
                     flow_star_rating,
@@ -103,10 +92,21 @@ impl<'h> Skill<'h> {
                 )
             }
             SkillKind::Tap { strains, .. } => {
-                self.calculate_difficulty_value(strains, TAP_STARS_PER_DOUBLE)
+                calculate_difficulty_value(strains, TAP_STARS_PER_DOUBLE)
             }
         }
     }
+}
+
+pub(crate) fn calculate_difficulty_value(strains: &[f32], stars_per_double: f32) -> f32 {
+    let difficulty_exponent = stars_per_double.log2().recip();
+    let mut difficulty = 0.0;
+
+    for &strain in strains {
+        difficulty += strain.powf(difficulty_exponent);
+    }
+
+    difficulty.powf(difficulty_exponent.recip())
 }
 
 pub(crate) fn calculate_display_difficulty_value(strains: &mut [f32]) -> f32 {

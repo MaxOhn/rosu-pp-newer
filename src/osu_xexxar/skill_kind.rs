@@ -141,18 +141,15 @@ impl SkillKind {
                 let rhythm_complexity = calculate_rhythm_difficulty(previous, avg_strain_time);
 
                 strain_time = strain_time - 25.0;
-
                 strain_value += TAP_STRAIN_TIME_BUFF_RANGE / strain_time;
 
                 *curr_strain *=
                     computed_decay.powf((current.strain_time / *avg_strain_time).max(1.0));
 
                 *curr_strain +=
-                    (1.0 + 0.5 * curr.snap_probability()) * strain_value * TAP_STRAIN_MULTIPLIER;
+                    (1.0 + 0.5 * current.snap_probability()) * strain_value * TAP_STRAIN_MULTIPLIER;
 
-                let strain = *curr_strain * rhythm_complexity;
-
-                strains.push(strain);
+                strains.push(*curr_strain * rhythm_complexity);
             }
         }
     }
