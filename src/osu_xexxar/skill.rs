@@ -1,15 +1,15 @@
-use super::{
-    skill_kind::{
-        AIM_COMBINED_STARS_PER_DOUBLE, AIM_FLOW_STARS_PER_DOUBLE, AIM_SNAP_STARS_PER_DOUBLE,
-        TAP_STARS_PER_DOUBLE,
-    },
-    DifficultyObject, SkillKind,
-};
+use super::{DifficultyObject, SkillKind};
 
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 
 const STAR_RATING_CONSTANT: f32 = 0.08265;
+
+const AIM_SNAP_STARS_PER_DOUBLE: f32 = 1.1;
+const AIM_FLOW_STARS_PER_DOUBLE: f32 = 1.1;
+const AIM_COMBINED_STARS_PER_DOUBLE: f32 = 1.15;
+
+const TAP_STARS_PER_DOUBLE: f32 = 1.075;
 
 #[derive(Debug)]
 pub(crate) struct Skill<'h> {
@@ -45,17 +45,8 @@ impl<'h> Skill<'h> {
         let difficulty_exponent = stars_per_double.log2().recip();
         let mut difficulty = 0.0;
 
-        // println!("diff_exp={}", difficulty_exponent);
-
-        for (_i, &strain) in strains.iter().enumerate() {
+        for &strain in strains {
             difficulty += strain.powf(difficulty_exponent);
-            // println!("{}: {}", _i, strain);
-            // println!(
-            //     "{}: {} => {}",
-            //     _i,
-            //     strain.powf(difficulty_exponent),
-            //     difficulty
-            // );
         }
 
         difficulty.powf(difficulty_exponent.recip())
@@ -80,10 +71,8 @@ impl<'h> Skill<'h> {
                 flow_strains,
                 ..
             } => {
-                let flow_star_rating =
-                    calculate_display_difficulty_value(flow_strains, AIM_FLOW_STARS_PER_DOUBLE);
-                let snap_star_rating =
-                    calculate_display_difficulty_value(snap_strains, AIM_SNAP_STARS_PER_DOUBLE);
+                let flow_star_rating = calculate_display_difficulty_value(flow_strains);
+                let snap_star_rating = calculate_display_difficulty_value(snap_strains);
 
                 self.combine_star_rating(
                     flow_star_rating,
@@ -91,9 +80,7 @@ impl<'h> Skill<'h> {
                     AIM_COMBINED_STARS_PER_DOUBLE,
                 )
             }
-            SkillKind::Tap { strains, .. } => {
-                calculate_display_difficulty_value(strains, TAP_STARS_PER_DOUBLE)
-            }
+            SkillKind::Tap { strains, .. } => calculate_display_difficulty_value(strains),
         }
     }
 
@@ -122,10 +109,7 @@ impl<'h> Skill<'h> {
     }
 }
 
-pub(crate) fn calculate_display_difficulty_value(
-    strains: &mut [f32],
-    stars_per_double: f32,
-) -> f32 {
+pub(crate) fn calculate_display_difficulty_value(strains: &mut [f32]) -> f32 {
     let mut difficulty = 0.0;
     let mut weight = 1.0;
     let decay_weight = 0.95;

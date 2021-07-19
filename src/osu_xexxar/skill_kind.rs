@@ -4,11 +4,10 @@ use rosu_pp::parse::Pos2;
 use std::collections::VecDeque;
 use std::f32::consts::{FRAC_PI_2, LN_2};
 
+const OBJ_COUNT_ESTIMATE: usize = 256;
+
 const AIM_BASE_DECAY: f32 = 0.75;
 const AIM_HISTORY_LEN: usize = 2;
-pub(crate) const AIM_SNAP_STARS_PER_DOUBLE: f32 = 1.1;
-pub(crate) const AIM_FLOW_STARS_PER_DOUBLE: f32 = 1.1;
-pub(crate) const AIM_COMBINED_STARS_PER_DOUBLE: f32 = 1.15;
 const AIM_SNAP_STRAIN_MULTIPLIER: f32 = 7.3727;
 const AIM_FLOW_STRAIN_MULTIPLIER: f32 = 16.272;
 const AIM_SLIDER_STRAIN_MULTIPLIER: f32 = 65.0;
@@ -19,7 +18,6 @@ const AIM_BEGIN_DECAY_THRESHOLD: f32 = 500.0;
 const TAP_STRAIN_TIME_BUFF_RANGE: f32 = 75.0;
 const TAP_BASE_DECAY: f32 = 0.9;
 const TAP_HISTORY_LEN: usize = 32;
-pub(crate) const TAP_STARS_PER_DOUBLE: f32 = 1.075;
 const TAP_STRAIN_MULTIPLIER: f32 = 1.725;
 const TAP_RHYTHM_MULTIPLIER: f32 = 0.625;
 const TAP_BEGIN_DECAY_THRESHOLD: f32 = 500.0;
@@ -49,8 +47,8 @@ impl SkillKind {
             curr_other_strain: 1.0,
             curr_snap_strain: 1.0,
             curr_flow_strain: 1.0,
-            snap_strains: Vec::with_capacity(128),
-            flow_strains: Vec::with_capacity(128),
+            snap_strains: Vec::with_capacity(OBJ_COUNT_ESTIMATE),
+            flow_strains: Vec::with_capacity(OBJ_COUNT_ESTIMATE),
         }
     }
 
@@ -59,7 +57,7 @@ impl SkillKind {
         Self::Tap {
             curr_strain: 1.0,
             avg_strain_time: 50.0,
-            strains: Vec::with_capacity(128),
+            strains: Vec::with_capacity(OBJ_COUNT_ESTIMATE),
         }
     }
 
@@ -73,8 +71,6 @@ impl SkillKind {
             None => return,
         };
 
-        let computed_decay = self.compute_decay(current.strain_time);
-
         match self {
             Self::Aim {
                 curr_other_strain,
@@ -83,6 +79,12 @@ impl SkillKind {
                 snap_strains,
                 flow_strains,
             } => {
+                let computed_decay = compute_decay(
+                    AIM_BASE_DECAY,
+                    current.strain_time,
+                    AIM_BEGIN_DECAY_THRESHOLD,
+                );
+
                 let next = current;
 
                 let prev = match previous.get(1) {
@@ -121,6 +123,12 @@ impl SkillKind {
                 avg_strain_time,
                 strains,
             } => {
+                let computed_decay = compute_decay(
+                    TAP_BASE_DECAY,
+                    current.strain_time,
+                    TAP_BEGIN_DECAY_THRESHOLD,
+                );
+
                 let prev_delta = curr.delta;
 
                 let mut strain_value = 0.25;
@@ -132,39 +140,17 @@ impl SkillKind {
 
                 let rhythm_complexity = calculate_rhythm_difficulty(previous, avg_strain_time);
 
-                // println!("rhythm_complexity={}", rhythm_complexity);
-
                 strain_time = strain_time - 25.0;
 
                 strain_value += TAP_STRAIN_TIME_BUFF_RANGE / strain_time;
 
-                // println!(
-                //     "strain_time={} | strain_value={} | snap_prob={}",
-                //     strain_time,
-                //     strain_value,
-                //     curr.snap_probability(),
-                // );
-
-                // print!("{} -> ", curr_strain);
-
                 *curr_strain *=
                     computed_decay.powf((current.strain_time / *avg_strain_time).max(1.0));
-
-                // print!("{} -> ", curr_strain);
 
                 *curr_strain +=
                     (1.0 + 0.5 * curr.snap_probability()) * strain_value * TAP_STRAIN_MULTIPLIER;
 
-                // println!("{}", curr_strain);
-
-                // println!(
-                //     "avg_strain_time={} | curr_strain={}",
-                //     avg_strain_time, curr_strain
-                // );
-
                 let strain = *curr_strain * rhythm_complexity;
-
-                // println!("{} * {} = {}", curr_strain, rhythm_complexity, strain);
 
                 strains.push(strain);
             }
@@ -177,41 +163,6 @@ impl SkillKind {
             Self::Aim { .. } => AIM_HISTORY_LEN,
             Self::Tap { .. } => TAP_HISTORY_LEN,
         }
-    }
-
-    #[inline]
-    fn base_decay(&self) -> f32 {
-        match self {
-            SkillKind::Aim { .. } => AIM_BASE_DECAY,
-            SkillKind::Tap { .. } => TAP_BASE_DECAY,
-        }
-    }
-
-    #[inline]
-    fn begin_decay_threshold(&self) -> f32 {
-        match self {
-            SkillKind::Aim { .. } => AIM_BEGIN_DECAY_THRESHOLD,
-            SkillKind::Tap { .. } => TAP_BEGIN_DECAY_THRESHOLD,
-        }
-    }
-
-    #[inline]
-    fn compute_decay(&self, ms: f32) -> f32 {
-        let begin_decay_threshold = self.begin_decay_threshold();
-        let base_decay = self.base_decay();
-
-        let res = if ms < begin_decay_threshold {
-            base_decay
-        } else {
-            (base_decay.powf(1000.0 / ms.min(begin_decay_threshold))).powf(ms / 1000.0)
-        };
-
-        // println!(
-        //     "ms={} | bdt={} | base_decay={} => {}",
-        //     ms, begin_decay_threshold, base_decay, res
-        // );
-
-        res
     }
 }
 
@@ -378,4 +329,13 @@ fn snap_scaling(dist: f32) -> f32 {
 #[inline]
 fn slider_strain_at(prev: &DifficultyObject, curr: &DifficultyObject) -> f32 {
     (prev.travel_dist / prev.strain_time).max(curr.travel_dist / curr.strain_time)
+}
+
+#[inline]
+fn compute_decay(base_decay: f32, ms: f32, begin_decay_threshold: f32) -> f32 {
+    if ms < begin_decay_threshold {
+        base_decay
+    } else {
+        (base_decay.powf(1000.0 / ms.min(begin_decay_threshold))).powf(ms / 1000.0)
+    }
 }
